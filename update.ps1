@@ -15,14 +15,18 @@ Expand-Archive -Path $zip -DestinationPath $tmp -Force
 $inner = Get-ChildItem $tmp | Select-Object -First 1 -ExpandProperty FullName
 
 Write-Host "[update] Copiando archivos a $root"
-# Copiar src y frontend/src (no node_modules, no dist, no .env)
-Copy-Item "$inner\src"          "$root\src"          -Recurse -Force
-Copy-Item "$inner\frontend\src" "$root\frontend\src" -Recurse -Force
+# Copiar contenido (no node_modules, no dist, no .env)
+Copy-Item "$inner\src\*"          "$root\src\"          -Recurse -Force
+Copy-Item "$inner\frontend\src\*" "$root\frontend\src\" -Recurse -Force
 if (Test-Path "$inner\frontend\index.html") {
     Copy-Item "$inner\frontend\index.html" "$root\frontend\index.html" -Force
 }
 if (Test-Path "$inner\package.json") {
     Copy-Item "$inner\package.json" "$root\package.json" -Force
+}
+# También actualizar el propio script
+if (Test-Path "$inner\update.ps1") {
+    Copy-Item "$inner\update.ps1" "$root\update.ps1" -Force
 }
 
 Write-Host "[update] Compilando frontend"
