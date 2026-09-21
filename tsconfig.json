@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "rootDir": "./src", /* Donde está tu código */
+    "outDir": "./dist", /* Donde se guardará lo compilado */
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "baseUrl": "./", /* Para resolver rutas */
+    "paths": {
+      "*": [
+        "node_modules/*",
+        "src/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*"
+  ], /* Incluye todo lo que esté en src */
+  "exclude": [
+    "node_modules"
+  ]
+}
