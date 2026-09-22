@@ -21,7 +21,7 @@ export interface AuthUser       { CODUSUARIO: number; USUARIO: string; CODVENDED
 export interface UserConfig     { almacen_origen: string; almacen_destino: string }
 export interface Seccion { NUMSECCION: number; DESCRIPCION: string }
 export interface Area { id: number; nombre: string; numseccion: number; codvendedor: number; familia_desc?: string | null; rol?: string }
-export interface UsuarioAdmin { codvendedor: number; usuario: string; rol: string; nombre_area: string; familia_desc: string | null; almacen_origen: string; almacen_destino: string }
+export interface UsuarioAdmin { codvendedor: number; usuario: string; area_id: number | null; rol: string; nombre_area: string; familia_desc: string | null; almacen_origen: string; almacen_destino: string }
 export interface Colaborador { id: number; nombre: string }
 export interface Merma { id: number; hora: string; codarticulo: number; descripcion: string; cantidad: number; motivo: string; codvendedor: number; nombre_operario: string }
 export interface StockRecetasRow { codarticulo: number; descripcion: string; total: number; alm: Record<string, number> }
@@ -66,9 +66,9 @@ export const fabApi = {
     apiFetch<{ ok: boolean }>('/fab/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   stockRecetas: () =>
     apiFetch<StockRecetasResp>('/fab/stock-recetas'),
-  colaboradores: (codvendedor: number) => apiFetch<Colaborador[]>(`/fab/colaboradores?codvendedor=${codvendedor}`),
-  agregarColaborador: (codvendedor: number, nombre: string) =>
-    apiFetch<{ ok: boolean; id: number }>('/fab/colaboradores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codvendedor, nombre }) }),
+  colaboradores: (area_id: number) => apiFetch<Colaborador[]>(`/fab/colaboradores?area_id=${area_id}`),
+  agregarColaborador: (area_id: number, nombre: string) =>
+    apiFetch<{ ok: boolean; id: number }>('/fab/colaboradores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ area_id, nombre }) }),
   eliminarColaborador: (id: number) => apiFetch<{ ok: boolean }>(`/fab/colaboradores/${id}`, { method: 'DELETE' }),
   mermas: (fecha: string) => apiFetch<Merma[]>(`/fab/mermas?fecha=${fecha}`),
   registrarMerma: (body: { codarticulo: number; descripcion: string; cantidad: number; motivo: string; codvendedor: number; nombre_operario: string }) =>

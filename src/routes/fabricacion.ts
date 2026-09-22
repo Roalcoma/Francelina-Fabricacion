@@ -104,6 +104,16 @@ export async function migrateFab() {
             activo      BIT           NOT NULL DEFAULT 1
         );
 
+        IF NOT EXISTS (
+            SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME='colaboradores' AND COLUMN_NAME='area_id'
+        )
+        BEGIN
+            ALTER TABLE colaboradores ADD area_id INT NULL;
+            UPDATE c SET c.area_id = a.id
+            FROM colaboradores c JOIN areas a ON a.codvendedor=c.codvendedor AND a.activo=1;
+        END
+
         IF OBJECT_ID('mermas') IS NULL
         CREATE TABLE mermas (
             id              INT IDENTITY PRIMARY KEY,
@@ -595,26 +605,26 @@ fabRouter.delete('/areas/:id', wrap(async (req, res) => {
     res.json({ ok: true });
 }));
 
-// ── GET  /fab/colaboradores?codvendedor= ─────────────────
+// ── GET  /fab/colaboradores?area_id= ─────────────────────
 fabRouter.get('/colaboradores', wrap(async (req, res) => {
-    const cv   = parseInt(req.query.codvendedor as string);
+    const aid  = parseInt(req.query.area_id as string);
     const pool = await getPool(FAB);
     const r    = await pool.request()
-        .input('cv', sql.Int, cv)
-        .query(`SELECT id, nombre FROM colaboradores WHERE codvendedor=@cv AND activo=1 ORDER BY nombre`);
+        .input('aid', sql.Int, aid)
+        .query(`SELECT id, nombre FROM colaboradores WHERE area_id=@aid AND activo=1 ORDER BY nombre`);
     res.json(r.recordset);
 }));
 
 // ── POST /fab/colaboradores ───────────────────────────────
 fabRouter.post('/colaboradores', wrap(async (req, res) => {
-    const { codvendedor, nombre } = req.body as { codvendedor: number; nombre: string };
-    if (codvendedor == null || !nombre?.trim())
-        return void res.status(400).json({ error: 'codvendedor y nombre requeridos' });
+    const { area_id, nombre } = req.body as { area_id: number; nombre: string };
+    if (area_id == null || !nombre?.trim())
+        return void res.status(400).json({ error: 'area_id y nombre requeridos' });
     const pool = await getPool(FAB);
     const r    = await pool.request()
-        .input('cv',  sql.Int,           codvendedor)
+        .input('aid', sql.Int,           area_id)
         .input('nom', sql.NVarChar(100), nombre.trim())
-        .query(`INSERT INTO colaboradores (codvendedor, nombre) OUTPUT INSERTED.id VALUES (@cv, @nom)`);
+        .query(`INSERT INTO colaboradores (area_id, nombre) OUTPUT INSERTED.id VALUES (@aid, @nom)`);
     res.json({ ok: true, id: r.recordset[0].id });
 }));
 
@@ -668,7 +678,7 @@ fabRouter.get('/admin/usuarios', wrap(async (req, res) => {
             WHERE ISNULL(BLOQUEADO,'F')!='T' AND ISNULL(DESCATALOGADO,'F')!='T'
             ORDER BY USUARIO
         `),
-        fabPool.request().query(`SELECT codvendedor, nombre, familia_desc, ISNULL(rol,'personal') AS rol FROM areas WHERE activo=1`),
+        fabPool.request().query(`SELECT id, codvendedor, nombre, familia_desc, ISNULL(rol,'personal') AS rol FROM areas WHERE activo=1`),
         fabPool.request().query(`SELECT codvendedor, almacen_origen, almacen_destino FROM configuracion_usuarios`),
     ]);
     const areaMap: Record<number,any>   = {};
@@ -678,6 +688,7 @@ fabRouter.get('/admin/usuarios', wrap(async (req, res) => {
     res.json(usuariosR.recordset.map(u => ({
         codvendedor:     u.CODUSUARIO,
         usuario:         u.USUARIO,
+        area_id:         areaMap[u.CODUSUARIO]?.id              ?? null,
         rol:             areaMap[u.CODUSUARIO]?.rol             ?? 'personal',
         nombre_area:     areaMap[u.CODUSUARIO]?.nombre          ?? '',
         familia_desc:    areaMap[u.CODUSUARIO]?.familia_desc    ?? null,
