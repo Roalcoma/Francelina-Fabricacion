@@ -29,6 +29,11 @@ if (Test-Path "$inner\update.ps1") {
     Copy-Item "$inner\update.ps1" "$root\update.ps1" -Force
 }
 
+Write-Host "[update] Compilando backend"
+Set-Location "$root"
+npm install --silent
+npx tsc
+
 Write-Host "[update] Compilando frontend"
 Set-Location "$root\frontend"
 npm install --silent
