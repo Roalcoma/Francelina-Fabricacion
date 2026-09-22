@@ -110,8 +110,7 @@ export async function migrateFab() {
         )
         BEGIN
             ALTER TABLE colaboradores ADD area_id INT NULL;
-            UPDATE c SET c.area_id = a.id
-            FROM colaboradores c JOIN areas a ON a.codvendedor=c.codvendedor AND a.activo=1;
+            EXEC('UPDATE c SET c.area_id = a.id FROM colaboradores c JOIN areas a ON a.codvendedor=c.codvendedor AND a.activo=1');
         END
 
         IF OBJECT_ID('mermas') IS NULL
