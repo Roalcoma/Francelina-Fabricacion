@@ -113,6 +113,12 @@ export async function migrateFab() {
             EXEC('UPDATE c SET c.area_id = a.id FROM colaboradores c JOIN areas a ON a.codvendedor=c.codvendedor AND a.activo=1');
         END
 
+        IF EXISTS (
+            SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME='colaboradores' AND COLUMN_NAME='codvendedor' AND IS_NULLABLE='NO'
+        )
+            ALTER TABLE colaboradores ALTER COLUMN codvendedor INT NULL;
+
         IF OBJECT_ID('mermas') IS NULL
         CREATE TABLE mermas (
             id              INT IDENTITY PRIMARY KEY,
