@@ -16,8 +16,10 @@ const areaExpandida   = ref<number | null>(null)
 const colabsArea      = ref<Colaborador[]>([])
 const nuevoColab      = ref('')
 const cargandoColabs  = ref(false)
+const colabError      = ref('')
 
 async function toggleColabs(area_id: number | null) {
+  colabError.value = ''
   if (!area_id || areaExpandida.value === area_id) { areaExpandida.value = null; return }
   areaExpandida.value = area_id
   cargandoColabs.value = true
@@ -27,9 +29,14 @@ async function toggleColabs(area_id: number | null) {
 async function agregarColab(area_id: number) {
   const nombre = nuevoColab.value.trim()
   if (!nombre) return
-  const { id } = await fabApi.agregarColaborador(area_id, nombre)
-  colabsArea.value.push({ id, nombre })
-  nuevoColab.value = ''
+  colabError.value = ''
+  try {
+    const { id } = await fabApi.agregarColaborador(area_id, nombre)
+    colabsArea.value.push({ id, nombre })
+    nuevoColab.value = ''
+  } catch (e: any) {
+    colabError.value = e.message
+  }
 }
 
 async function eliminarColab(id: number) {
@@ -169,6 +176,7 @@ async function guardar(cv: number) {
                       @keydown.enter="agregarColab(u.area_id!)"/>
                     <button class="btn-save" @click="agregarColab(u.area_id!)">+</button>
                   </div>
+                  <div v-if="colabError" class="msg err">{{ colabError }}</div>
                 </template>
               </div>
             </td>
