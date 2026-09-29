@@ -22,7 +22,6 @@ const currentUser = ref<AuthUser | null>(
 function onLogin(user: AuthUser) {
   localStorage.setItem(AUTH_KEY, JSON.stringify(user))
   currentUser.value = user
-  cargarColaboradores()
   cargarArea()
 }
 
@@ -45,6 +44,7 @@ async function cargarArea() {
     const a = await fabApi.areaUsuario(currentUser.value.CODVENDEDOR)
     areaActual.value = a
     localStorage.setItem('fab_area', JSON.stringify(a))
+    if (a?.id) colaboradores.value = await fabApi.colaboradores(a.id)
   } catch { /* silencioso */ }
 }
 
@@ -55,12 +55,6 @@ const colaboradorActual = ref<Colaborador | null>(
 )
 const showColabPicker  = ref(false)
 
-async function cargarColaboradores() {
-  if (!currentUser.value) return
-  try { colaboradores.value = await fabApi.colaboradores(currentUser.value.CODVENDEDOR) }
-  catch { /* silencioso */ }
-}
-
 function elegirColaborador(c: Colaborador | null) {
   colaboradorActual.value = c
   localStorage.setItem(COLAB_KEY, JSON.stringify(c))
@@ -68,7 +62,7 @@ function elegirColaborador(c: Colaborador | null) {
 }
 
 onMounted(() => {
-  if (currentUser.value) { cargarColaboradores(); cargarArea() }
+  if (currentUser.value) cargarArea()
 })
 
 // ── navigation ──────────────────────────────────────
