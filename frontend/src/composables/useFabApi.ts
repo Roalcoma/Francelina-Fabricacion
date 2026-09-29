@@ -66,9 +66,9 @@ export const fabApi = {
     apiFetch<{ ok: boolean }>('/fab/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   stockRecetas: () =>
     apiFetch<StockRecetasResp>('/fab/stock-recetas'),
-  colaboradores: (area_id: number) => apiFetch<Colaborador[]>(`/fab/colaboradores?area_id=${area_id}`),
-  agregarColaborador: (area_id: number, nombre: string) =>
-    apiFetch<{ ok: boolean; id: number }>('/fab/colaboradores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ area_id, nombre }) }),
+  colaboradores: (codvendedor: number) => apiFetch<Colaborador[]>(`/fab/colaboradores?codvendedor=${codvendedor}`),
+  agregarColaborador: (codvendedor: number, nombre: string) =>
+    apiFetch<{ ok: boolean; id: number }>('/fab/colaboradores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codvendedor, nombre }) }),
   eliminarColaborador: (id: number) => apiFetch<{ ok: boolean }>(`/fab/colaboradores/${id}`, { method: 'DELETE' }),
   mermas: (fecha: string) => apiFetch<Merma[]>(`/fab/mermas?fecha=${fecha}`),
   registrarMerma: (body: { codarticulo: number; descripcion: string; cantidad: number; motivo: string; codvendedor: number; nombre_operario: string }) =>

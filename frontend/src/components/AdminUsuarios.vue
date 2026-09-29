@@ -18,20 +18,20 @@ const nuevoColab      = ref('')
 const cargandoColabs  = ref(false)
 const colabError      = ref('')
 
-async function toggleColabs(area_id: number | null) {
+async function toggleColabs(cv: number) {
   colabError.value = ''
-  if (!area_id || areaExpandida.value === area_id) { areaExpandida.value = null; return }
-  areaExpandida.value = area_id
+  if (areaExpandida.value === cv) { areaExpandida.value = null; return }
+  areaExpandida.value = cv
   cargandoColabs.value = true
-  try { colabsArea.value = await fabApi.colaboradores(area_id) } finally { cargandoColabs.value = false }
+  try { colabsArea.value = await fabApi.colaboradores(cv) } finally { cargandoColabs.value = false }
 }
 
-async function agregarColab(area_id: number) {
+async function agregarColab(cv: number) {
   const nombre = nuevoColab.value.trim()
   if (!nombre) return
   colabError.value = ''
   try {
-    const { id } = await fabApi.agregarColaborador(area_id, nombre)
+    const { id } = await fabApi.agregarColaborador(cv, nombre)
     colabsArea.value.push({ id, nombre })
     nuevoColab.value = ''
   } catch (e: any) {
@@ -145,12 +145,10 @@ async function guardar(cv: number) {
 
             <td>
               <button
-                v-if="u.area_id"
                 class="btn-colabs"
-                :class="{ active: areaExpandida === u.area_id }"
-                @click="toggleColabs(u.area_id)"
-              >{{ areaExpandida === u.area_id ? '▲' : '▼' }} {{ u.area_id ? '' : '—' }}</button>
-              <span v-else class="text-muted">Sin área</span>
+                :class="{ active: areaExpandida === u.codvendedor }"
+                @click="toggleColabs(u.codvendedor)"
+              >{{ areaExpandida === u.codvendedor ? '▲' : '▼' }}</button>
             </td>
 
             <td class="td-action">
@@ -161,7 +159,7 @@ async function guardar(cv: number) {
             </td>
           </tr>
 
-          <tr v-if="areaExpandida === u.area_id && u.area_id" class="colab-row">
+          <tr v-if="areaExpandida === u.codvendedor" class="colab-row">
             <td colspan="8" class="colab-cell">
               <div class="colab-panel">
                 <span v-if="cargandoColabs" class="colab-empty">Cargando…</span>
@@ -173,8 +171,8 @@ async function guardar(cv: number) {
                   </span>
                   <div class="colab-add">
                     <input v-model="nuevoColab" class="cell-input colab-input" placeholder="Nuevo colaborador…"
-                      @keydown.enter="agregarColab(u.area_id!)"/>
-                    <button class="btn-save" @click="agregarColab(u.area_id!)">+</button>
+                      @keydown.enter="agregarColab(u.codvendedor)"/>
+                    <button class="btn-save" @click="agregarColab(u.codvendedor)">+</button>
                   </div>
                   <div v-if="colabError" class="msg err">{{ colabError }}</div>
                 </template>

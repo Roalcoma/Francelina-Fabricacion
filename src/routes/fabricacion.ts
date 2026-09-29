@@ -610,26 +610,26 @@ fabRouter.delete('/areas/:id', wrap(async (req, res) => {
     res.json({ ok: true });
 }));
 
-// ── GET  /fab/colaboradores?area_id= ─────────────────────
+// ── GET  /fab/colaboradores?codvendedor= ─────────────────
 fabRouter.get('/colaboradores', wrap(async (req, res) => {
-    const aid  = parseInt(req.query.area_id as string);
+    const cv   = parseInt(req.query.codvendedor as string);
     const pool = await getPool(FAB);
     const r    = await pool.request()
-        .input('aid', sql.Int, aid)
-        .query(`SELECT id, nombre FROM colaboradores WHERE area_id=@aid AND activo=1 ORDER BY nombre`);
+        .input('cv', sql.Int, cv)
+        .query(`SELECT id, nombre FROM colaboradores WHERE codvendedor=@cv AND activo=1 ORDER BY nombre`);
     res.json(r.recordset);
 }));
 
 // ── POST /fab/colaboradores ───────────────────────────────
 fabRouter.post('/colaboradores', wrap(async (req, res) => {
-    const { area_id, nombre } = req.body as { area_id: number; nombre: string };
-    if (area_id == null || !nombre?.trim())
-        return void res.status(400).json({ error: 'area_id y nombre requeridos' });
+    const { codvendedor, nombre } = req.body as { codvendedor: number; nombre: string };
+    if (codvendedor == null || !nombre?.trim())
+        return void res.status(400).json({ error: 'codvendedor y nombre requeridos' });
     const pool = await getPool(FAB);
     const r    = await pool.request()
-        .input('aid', sql.Int,           area_id)
+        .input('cv',  sql.Int,           codvendedor)
         .input('nom', sql.NVarChar(100), nombre.trim())
-        .query(`INSERT INTO colaboradores (area_id, nombre) OUTPUT INSERTED.id VALUES (@aid, @nom)`);
+        .query(`INSERT INTO colaboradores (codvendedor, nombre) OUTPUT INSERTED.id VALUES (@cv, @nom)`);
     res.json({ ok: true, id: r.recordset[0].id });
 }));
 

@@ -79,8 +79,7 @@ async function guardarArea() {
 const colaboradores = ref<Colaborador[]>([])
 
 async function cargarColaboradores() {
-  if (!areaActual.value?.id) return
-  colaboradores.value = await fabApi.colaboradores(areaActual.value.id)
+  colaboradores.value = await fabApi.colaboradores(props.user.CODUSUARIO)
 }
 
 onMounted(async () => {
@@ -94,8 +93,7 @@ onMounted(async () => {
   const [secs, fams] = await Promise.all([fabApi.secciones(), fabApi.familias()])
   secciones.value = secs
   familias.value  = fams
-  await cargarArea()
-  await cargarColaboradores()
+  await Promise.all([cargarArea(), cargarColaboradores()])
 })
 
 async function guardar() {

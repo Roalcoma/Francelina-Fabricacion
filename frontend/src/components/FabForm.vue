@@ -100,15 +100,16 @@ const stockInsuficiente = computed(() =>
 
 // ── mount ───────────────────────────────────────────
 onMounted(async () => {
-  const [alms, cfg, area] = await Promise.all([
+  const [alms, cfg, area, colabs] = await Promise.all([
     fabApi.almacenes(),
     fabApi.getConfig(props.user.CODVENDEDOR),
     fabApi.areaUsuario(props.user.CODUSUARIO),
+    fabApi.colaboradores(props.user.CODUSUARIO),
   ])
-  almacenes.value = alms
+  almacenes.value     = alms
+  colaboradores.value = colabs
   if (cfg.almacen_origen)  codalmacen.value         = cfg.almacen_origen
   if (cfg.almacen_destino) codalmacen_destino.value = cfg.almacen_destino
-  if (area) colaboradores.value = await fabApi.colaboradores(area.id)
 })
 
 let _recetasReq = 0
