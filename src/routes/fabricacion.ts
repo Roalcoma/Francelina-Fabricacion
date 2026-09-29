@@ -711,14 +711,18 @@ fabRouter.put('/admin/usuarios/:codvendedor', wrap(async (req, res) => {
     };
     const fabPool = await getPool(FAB);
     if (nombre_area?.trim()) {
-        await fabPool.request().input('cv', sql.Int, cv)
-            .query(`UPDATE areas SET activo=0 WHERE codvendedor=@cv`);
         await fabPool.request()
             .input('nom', sql.NVarChar(100), nombre_area.trim())
             .input('cv',  sql.Int,           cv)
             .input('fam', sql.NVarChar(100), familia_desc?.trim() || null)
             .input('rol', sql.NVarChar(20),  rol || 'personal')
-            .query(`INSERT INTO areas (nombre, numseccion, codvendedor, familia_desc, rol) VALUES (@nom, 0, @cv, @fam, @rol)`);
+            .query(`
+                MERGE areas AS t
+                USING (SELECT @cv AS codvendedor) AS s ON t.codvendedor=s.codvendedor AND t.activo=1
+                WHEN MATCHED     THEN UPDATE SET nombre=@nom, familia_desc=@fam, rol=@rol
+                WHEN NOT MATCHED THEN INSERT (nombre, numseccion, codvendedor, familia_desc, rol, activo)
+                                      VALUES (@nom, 0, @cv, @fam, @rol, 1);
+            `);
     } else {
         await fabPool.request()
             .input('cv',  sql.Int,          cv)
