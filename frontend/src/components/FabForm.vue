@@ -103,7 +103,7 @@ onMounted(async () => {
   const [alms, cfg, area] = await Promise.all([
     fabApi.almacenes(),
     fabApi.getConfig(props.user.CODVENDEDOR),
-    fabApi.areaUsuario(props.user.CODVENDEDOR),
+    fabApi.areaUsuario(props.user.CODUSUARIO),
   ])
   almacenes.value = alms
   if (cfg.almacen_origen)  codalmacen.value         = cfg.almacen_origen

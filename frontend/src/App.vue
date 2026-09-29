@@ -41,7 +41,7 @@ const areaActual = ref<Area | null>(null)
 async function cargarArea() {
   if (!currentUser.value) return
   try {
-    const a = await fabApi.areaUsuario(currentUser.value.CODVENDEDOR)
+    const a = await fabApi.areaUsuario(currentUser.value.CODUSUARIO)
     areaActual.value = a
     localStorage.setItem('fab_area', JSON.stringify(a))
     if (a?.id) colaboradores.value = await fabApi.colaboradores(a.id)

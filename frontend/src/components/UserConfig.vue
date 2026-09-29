@@ -51,7 +51,7 @@ const areaGuardando  = ref(false)
 const areaGuardada   = ref(false)
 
 async function cargarArea() {
-  areaActual.value = await fabApi.areaUsuario(props.user.CODVENDEDOR)
+  areaActual.value = await fabApi.areaUsuario(props.user.CODUSUARIO)
   if (areaActual.value) {
     areaNombre.value  = areaActual.value.nombre
     areaSec.value     = areaActual.value.numseccion
@@ -66,7 +66,7 @@ async function guardarArea() {
     await fabApi.crearArea({
       nombre:       areaNombre.value.trim(),
       numseccion:   0,
-      codvendedor:  props.user.CODVENDEDOR,
+      codvendedor:  props.user.CODUSUARIO,
       familia_desc: areaFamilia.value || null,
     })
     await cargarArea()
