@@ -76,27 +76,11 @@ async function guardarArea() {
 }
 
 // ── colaboradores ────────────────────────────────────
-const colaboradores   = ref<Colaborador[]>([])
-const nuevoColabNombre = ref('')
-const colabGuardando   = ref(false)
+const colaboradores = ref<Colaborador[]>([])
 
 async function cargarColaboradores() {
-  colaboradores.value = await fabApi.colaboradores(props.user.CODVENDEDOR)
-}
-
-async function agregarColab() {
-  if (!nuevoColabNombre.value.trim()) return
-  colabGuardando.value = true
-  try {
-    await fabApi.agregarColaborador(props.user.CODVENDEDOR, nuevoColabNombre.value.trim())
-    nuevoColabNombre.value = ''
-    await cargarColaboradores()
-  } finally { colabGuardando.value = false }
-}
-
-async function eliminarColab(id: number) {
-  await fabApi.eliminarColaborador(id)
-  await cargarColaboradores()
+  if (!areaActual.value?.id) return
+  colaboradores.value = await fabApi.colaboradores(areaActual.value.id)
 }
 
 onMounted(async () => {
@@ -110,8 +94,8 @@ onMounted(async () => {
   const [secs, fams] = await Promise.all([fabApi.secciones(), fabApi.familias()])
   secciones.value = secs
   familias.value  = fams
-  await cargarColaboradores()
   await cargarArea()
+  await cargarColaboradores()
 })
 
 async function guardar() {
@@ -208,24 +192,14 @@ async function guardar() {
           <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/>
           </svg>
-          Colaboradores
+          Colaboradores del área
         </div>
+        <p class="cfg-hint" style="margin:0">Los colaboradores son administrados por el administrador del sistema.</p>
         <div class="colab-list">
           <div v-if="!colaboradores.length" class="cfg-hint" style="margin:0">Sin colaboradores aún.</div>
           <div v-for="c in colaboradores" :key="c.id" class="colab-row">
             <span class="colab-nombre">{{ c.nombre }}</span>
-            <button class="btn-del-colab" @click="eliminarColab(c.id)" title="Eliminar">
-              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
-              </svg>
-            </button>
           </div>
-        </div>
-        <div class="colab-add-row">
-          <input v-model="nuevoColabNombre" placeholder="Nombre del colaborador" @keydown.enter="agregarColab" style="flex:1;font-size:.78rem"/>
-          <button class="btn-add-colab" :disabled="colabGuardando || !nuevoColabNombre.trim()" @click="agregarColab">
-            {{ colabGuardando ? '…' : 'Agregar' }}
-          </button>
         </div>
       </div>
 
