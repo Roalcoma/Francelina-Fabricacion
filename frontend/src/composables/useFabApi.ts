@@ -35,7 +35,8 @@ export interface Seccion { NUMSECCION: number; DESCRIPCION: string }
 export interface Area { id: number; nombre: string; numseccion: number; codvendedor: number; familia_desc?: string | null; rol?: string }
 export interface UsuarioAdmin { codvendedor: number; usuario: string; rol: string; nombre_area: string; familia_desc: string | null; almacen_origen: string; almacen_destino: string }
 export interface Colaborador { id: number; nombre: string }
-export interface Merma { id: number; hora: string; codarticulo: number; descripcion: string; cantidad: number; motivo: string; codvendedor: number; nombre_operario: string }
+export interface Merma { id: number; hora: string; codarticulo: number; descripcion: string; cantidad: number; motivo: string; codvendedor: number; nombre_operario: string; codalmacen: string; codalmacen_destino: string; componentes: number }
+export interface MermaComponente { codarticulo: number; descripcion: string; unidades_kit: number; unidades_total: number }
 export interface StockRecetasRow { codarticulo: number; descripcion: string; total: number; alm: Record<string, number> }
 export interface StockRecetasResp { cols: string[]; rows: StockRecetasRow[] }
 
@@ -85,7 +86,8 @@ export const fabApi = {
     apiFetch<{ ok: boolean; id: number }>('/fab/colaboradores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codvendedor, nombre }) }),
   eliminarColaborador: (id: number) => apiFetch<{ ok: boolean }>(`/fab/colaboradores/${id}`, { method: 'DELETE' }),
   mermas: (fecha: string) => apiFetch<Merma[]>(`/fab/mermas?fecha=${fecha}`),
-  registrarMerma: (body: { codarticulo: number; descripcion: string; cantidad: number; motivo: string; nombre_operario: string }) =>
+  componentesMerma: (id: number) => apiFetch<MermaComponente[]>(`/fab/mermas/${id}/componentes`),
+  registrarMerma: (body: { codarticulo: number; descripcion: string; cantidad: number; motivo: string; nombre_operario: string; codalmacen: string; codalmacen_destino: string }) =>
     apiFetch<{ ok: boolean; id: number; hora: string }>('/fab/mermas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   setEstado: (id: number, estado: 'pendiente' | 'aprobado' | 'cancelado') =>
     apiFetch<{ ok: boolean }>(`/fab/fabricaciones/${id}/estado`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estado }) }),

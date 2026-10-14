@@ -131,6 +131,19 @@ export async function migrateFab() {
             codvendedor     INT          NOT NULL,
             nombre_operario NVARCHAR(100) NOT NULL
         );
+
+        IF COL_LENGTH('mermas', 'codalmacen') IS NULL
+        ALTER TABLE mermas ADD codalmacen VARCHAR(10) NULL, codalmacen_destino VARCHAR(10) NULL;
+
+        IF OBJECT_ID('mermas_componentes') IS NULL
+        CREATE TABLE mermas_componentes (
+            id             INT IDENTITY PRIMARY KEY,
+            id_merma       INT           NOT NULL,
+            codarticulo    INT           NOT NULL,
+            descripcion    NVARCHAR(200) NOT NULL,
+            unidades_kit   FLOAT         NOT NULL,
+            unidades_total FLOAT         NOT NULL
+        );
     `);
 }
 
@@ -707,31 +720,70 @@ fabRouter.get('/mermas', wrap(async (req, res) => {
     const pool  = await getPool(FAB);
     const r = await pool.request()
         .input('f', sql.Date, fecha)
-        .query(`SELECT id, CONVERT(varchar(5), hora, 108) AS hora, codarticulo, descripcion,
-                       cantidad, motivo, codvendedor, nombre_operario
-                FROM mermas WHERE fecha=@f ORDER BY hora DESC`);
+        .query(`SELECT m.id, CONVERT(varchar(5), m.hora, 108) AS hora, m.codarticulo, m.descripcion,
+                       m.cantidad, m.motivo, m.codvendedor, m.nombre_operario,
+                       ISNULL(m.codalmacen,'') AS codalmacen, ISNULL(m.codalmacen_destino,'') AS codalmacen_destino,
+                       (SELECT COUNT(*) FROM mermas_componentes mc WHERE mc.id_merma=m.id) AS componentes
+                FROM mermas m WHERE m.fecha=@f ORDER BY m.hora DESC`);
+    res.json(r.recordset);
+}));
+
+// ── GET /fab/mermas/:id/componentes ───────────────────────
+fabRouter.get('/mermas/:id/componentes', wrap(async (req, res) => {
+    const pool = await getPool(FAB);
+    const r = await pool.request().input('id', sql.Int, parseInt(req.params.id as string))
+        .query(`SELECT codarticulo, descripcion, unidades_kit, unidades_total FROM mermas_componentes WHERE id_merma=@id ORDER BY id`);
     res.json(r.recordset);
 }));
 
 // ── POST /fab/mermas ──────────────────────────────────────
+// si el artículo es receta, se registran sus ingredientes (tomados de ICG) × cantidad
 fabRouter.post('/mermas', wrap(async (req, res) => {
-    const { codarticulo, descripcion, cantidad, motivo, nombre_operario } =
-        req.body as { codarticulo: number; descripcion: string; cantidad: number; motivo: string; nombre_operario: string };
+    const { codarticulo, descripcion, cantidad, motivo, nombre_operario, codalmacen, codalmacen_destino } =
+        req.body as { codarticulo: number; descripcion: string; cantidad: number; motivo: string; nombre_operario: string; codalmacen: string; codalmacen_destino: string };
     const codvendedor = sesion(req).cv;
-    if (!codarticulo || !cantidad || !motivo)
-        return void res.status(400).json({ error: 'Faltan campos requeridos' });
+    if (!codarticulo || !cantidad || !motivo || !codalmacen || !codalmacen_destino)
+        return void res.status(400).json({ error: 'Faltan campos requeridos (artículo, cantidad, motivo, almacén origen y destino)' });
+
+    const comps = (await (await getPool(LOCO)).request().input('id', sql.Int, codarticulo).query(`
+        SELECT k.CODARTKIT, ak.DESCRIPCION, k.UNIDADES AS UDS_KIT
+        FROM KITS k JOIN ARTICULOS ak ON ak.CODARTICULO=k.CODARTKIT
+        WHERE k.CODARTICULO=@id AND k.TALLA='.' AND k.COLOR='.'
+        ORDER BY k.LINEAKIT`)).recordset;
+
     const pool = await getPool(FAB);
-    const r = await pool.request()
-        .input('ca',  sql.Int,           codarticulo)
-        .input('des', sql.NVarChar(200), descripcion || '')
-        .input('can', sql.Float,         cantidad)
-        .input('mot', sql.NVarChar(300), motivo)
-        .input('cv',  sql.Int,           codvendedor)
-        .input('nom', sql.NVarChar(100), nombre_operario || '')
-        .query(`INSERT INTO mermas (codarticulo, descripcion, cantidad, motivo, codvendedor, nombre_operario)
-                OUTPUT INSERTED.id, CONVERT(varchar(5), INSERTED.hora, 108) AS hora
-                VALUES (@ca, @des, @can, @mot, @cv, @nom)`);
-    res.json({ ok: true, ...r.recordset[0] });
+    const tx   = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+        const r = await new sql.Request(tx)
+            .input('ca',  sql.Int,           codarticulo)
+            .input('des', sql.NVarChar(200), descripcion || '')
+            .input('can', sql.Float,         cantidad)
+            .input('mot', sql.NVarChar(300), motivo)
+            .input('cv',  sql.Int,           codvendedor)
+            .input('nom', sql.NVarChar(100), nombre_operario || '')
+            .input('alm', sql.VarChar(10),   codalmacen)
+            .input('ald', sql.VarChar(10),   codalmacen_destino)
+            .query(`INSERT INTO mermas (codarticulo, descripcion, cantidad, motivo, codvendedor, nombre_operario, codalmacen, codalmacen_destino)
+                    OUTPUT INSERTED.id, CONVERT(varchar(5), INSERTED.hora, 108) AS hora
+                    VALUES (@ca, @des, @can, @mot, @cv, @nom, @alm, @ald)`);
+        const { id, hora } = r.recordset[0];
+        for (const c of comps) {
+            await new sql.Request(tx)
+                .input('im',   sql.Int,           id)
+                .input('ca',   sql.Int,           c.CODARTKIT)
+                .input('des',  sql.NVarChar(200), c.DESCRIPCION || '')
+                .input('ukit', sql.Float,         c.UDS_KIT || 0)
+                .input('utot', sql.Float,         (c.UDS_KIT || 0) * cantidad)
+                .query(`INSERT INTO mermas_componentes (id_merma, codarticulo, descripcion, unidades_kit, unidades_total)
+                        VALUES (@im, @ca, @des, @ukit, @utot)`);
+        }
+        await tx.commit();
+        res.json({ ok: true, id, hora, componentes: comps.length });
+    } catch (e) {
+        await tx.rollback();
+        throw e;
+    }
 }));
 
 // ── GET /fab/admin/usuarios ───────────────────────────────────────

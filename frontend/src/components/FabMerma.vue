@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import { fabApi, fechaLocal, type Receta, type Merma, type AuthUser } from '../composables/useFabApi'
+import { fabApi, fechaLocal, type Receta, type Merma, type AuthUser, type Almacen, type Componente, type MermaComponente } from '../composables/useFabApi'
 
 const props = defineProps<{ user: AuthUser; colaborador?: { id: number; nombre: string } | null; familia_desc?: string | null }>()
 
@@ -17,23 +17,45 @@ const errorMsg    = ref('')
 const recetas = ref<Receta[]>([])
 watch(() => props.familia_desc, async fam => { recetas.value = await fabApi.recetas(fam) }, { immediate: true })
 
+// ── almacenes ─────────────────────────────────────────────
+const almacenes          = ref<Almacen[]>([])
+const codalmacen         = ref('')
+const codalmacen_destino = ref('')
+
+// ── ingredientes de la receta elegida ─────────────────────
+const ingredientes        = ref<Componente[]>([])
+const cargandoIngredientes = ref(false)
+
 watch(buscar, val => {
+  if (articulo.value && val === articulo.value.DESCRIPCION) return
   articulo.value = null
+  ingredientes.value = []
   const q = val.trim().toUpperCase()
   sugerencias.value = q
     ? recetas.value.filter(r => r.DESCRIPCION.toUpperCase().includes(q) || r.REFPROVEEDOR.toUpperCase().includes(q) || r.CODBARRAS.includes(q))
     : []
 })
 
-function elegirArticulo(r: Receta) {
+async function elegirArticulo(r: Receta) {
   articulo.value = r
   buscar.value   = r.DESCRIPCION
   sugerencias.value = []
+  cargandoIngredientes.value = true
+  try { ingredientes.value = (await fabApi.receta(r.CODARTICULO)).componentes }
+  finally { cargandoIngredientes.value = false }
+}
+
+function fmtNum(n: number) {
+  const v = Number(n)
+  return Number.isInteger(v) ? v.toLocaleString('es-PY') : v.toLocaleString('es-PY', { maximumFractionDigits: 3 })
 }
 
 async function registrar() {
   if (!articulo.value || !cantidad.value || !motivo.value.trim()) {
     errorMsg.value = 'Completa todos los campos.'; return
+  }
+  if (!codalmacen.value || !codalmacen_destino.value) {
+    errorMsg.value = 'Selecciona el almacén de origen y de destino.'; return
   }
   if (Number(cantidad.value) <= 0) {
     errorMsg.value = 'La cantidad debe ser mayor a 0.'; return
@@ -47,9 +69,11 @@ async function registrar() {
       cantidad:        Number(cantidad.value),
       motivo:          motivo.value.trim(),
       nombre_operario: props.colaborador?.nombre ?? props.user.USUARIO,
+      codalmacen:         codalmacen.value,
+      codalmacen_destino: codalmacen_destino.value,
     })
     guardadoOk.value = true
-    buscar.value = ''; articulo.value = null; cantidad.value = ''; motivo.value = ''
+    buscar.value = ''; articulo.value = null; ingredientes.value = []; cantidad.value = ''; motivo.value = ''
     await cargarLista()
     setTimeout(() => guardadoOk.value = false, 2000)
   } catch (e: any) {
@@ -65,12 +89,29 @@ const lista  = ref<Merma[]>([])
 const cargandoLista = ref(false)
 
 async function cargarLista() {
+  expandida.value = null
   cargandoLista.value = true
   try { lista.value = await fabApi.mermas(fecha.value) }
   finally { cargandoLista.value = false }
 }
 
-onMounted(cargarLista)
+const expandida   = ref<number | null>(null)
+const detalle     = ref<MermaComponente[]>([])
+async function toggleDetalle(m: Merma) {
+  if (!m.componentes) return
+  if (expandida.value === m.id) { expandida.value = null; return }
+  expandida.value = m.id
+  detalle.value = []
+  detalle.value = await fabApi.componentesMerma(m.id)
+}
+
+onMounted(async () => {
+  cargarLista()
+  const [alms, cfg] = await Promise.all([fabApi.almacenes(), fabApi.getConfig(props.user.CODVENDEDOR)])
+  almacenes.value = alms
+  codalmacen.value         = cfg.almacen_origen  || ''
+  codalmacen_destino.value = cfg.almacen_destino || ''
+})
 watch(fecha, cargarLista)
 </script>
 
@@ -120,6 +161,37 @@ watch(fecha, cargarLista)
           <input v-model="cantidad" type="number" min="0.01" step="0.01" placeholder="0" class="field-input"/>
         </div>
 
+        <!-- Ingredientes a mermar -->
+        <div v-if="articulo" class="field-group">
+          <label class="field-label">Ingredientes a mermar</label>
+          <div v-if="cargandoIngredientes" class="ing-empty">Cargando ingredientes…</div>
+          <div v-else-if="!ingredientes.length" class="ing-empty">No es receta: se merma solo el artículo.</div>
+          <table v-else class="ing-tabla">
+            <tbody>
+              <tr v-for="c in ingredientes" :key="c.LINEAKIT">
+                <td>{{ c.DESCRIPCION }}</td>
+                <td class="mono num">{{ fmtNum(c.UDS_KIT * (Number(cantidad) || 0)) }} <span class="um">{{ c.UNIDADMEDIDA }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Almacenes -->
+        <div class="field-group">
+          <label class="field-label">Almacén origen</label>
+          <select v-model="codalmacen" class="field-input">
+            <option value="">— Seleccionar —</option>
+            <option v-for="a in almacenes" :key="a.CODALMACEN" :value="a.CODALMACEN">{{ a.CODALMACEN }} — {{ a.NOMBREALMACEN }}</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">Almacén destino</label>
+          <select v-model="codalmacen_destino" class="field-input">
+            <option value="">— Seleccionar —</option>
+            <option v-for="a in almacenes" :key="a.CODALMACEN" :value="a.CODALMACEN">{{ a.CODALMACEN }} — {{ a.NOMBREALMACEN }}</option>
+          </select>
+        </div>
+
         <!-- Motivo -->
         <div class="field-group">
           <label class="field-label">Motivo</label>
@@ -162,18 +234,38 @@ watch(fecha, cargarLista)
               <th>Hora</th>
               <th>Artículo</th>
               <th>Cant.</th>
+              <th>Almacenes</th>
               <th>Motivo</th>
               <th>Responsable</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="m in lista" :key="m.id">
-              <td class="mono">{{ m.hora }}</td>
-              <td>{{ m.descripcion }}</td>
-              <td class="mono center">{{ m.cantidad }}</td>
-              <td class="motivo-cell">{{ m.motivo }}</td>
-              <td>{{ m.nombre_operario }}</td>
-            </tr>
+            <template v-for="m in lista" :key="m.id">
+              <tr :class="{ clickable: m.componentes }" @click="toggleDetalle(m)">
+                <td class="mono">{{ m.hora }}</td>
+                <td>
+                  {{ m.descripcion }}
+                  <span v-if="m.componentes" class="ing-badge">{{ expandida === m.id ? '▲' : '▼' }} {{ m.componentes }} ingr.</span>
+                </td>
+                <td class="mono center">{{ m.cantidad }}</td>
+                <td class="mono nowrap">{{ m.codalmacen ? `${m.codalmacen} → ${m.codalmacen_destino}` : '—' }}</td>
+                <td class="motivo-cell">{{ m.motivo }}</td>
+                <td>{{ m.nombre_operario }}</td>
+              </tr>
+              <tr v-if="expandida === m.id" class="detalle-row">
+                <td colspan="6">
+                  <div v-if="!detalle.length" class="ing-empty">Cargando…</div>
+                  <table v-else class="ing-tabla">
+                    <tbody>
+                      <tr v-for="d in detalle" :key="d.codarticulo">
+                        <td>{{ d.descripcion }}</td>
+                        <td class="mono num">{{ fmtNum(d.unidades_total) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </td>
+              </tr>
+            </template>
           </tbody>
         </table>
       </div>
@@ -260,6 +352,7 @@ watch(fecha, cargarLista)
 }
 .lista-title { font-size: .8rem; font-weight: 700; color: var(--text); flex: 1; }
 .date-pick {
+  width: auto;
   font-size: .78rem; padding: 6px 10px; border-radius: 10px;
   border: 1.5px solid var(--border); background: var(--panel2);
   color: var(--text); font-family: inherit;
@@ -289,10 +382,24 @@ watch(fecha, cargarLista)
 .mono   { font-family: 'Fira Code', monospace; font-size: .75rem; }
 .center { text-align: center; }
 .motivo-cell { max-width: 260px; white-space: pre-wrap; word-break: break-word; }
+.nowrap { white-space: nowrap; }
+
+.ing-empty { font-size: .73rem; color: var(--text-muted); font-style: italic; }
+.ing-tabla { width: 100%; border-collapse: collapse; font-size: .75rem; }
+.ing-tabla td { padding: 5px 8px; border-bottom: 1px solid var(--border); color: var(--text-soft); }
+.ing-tabla tr:last-child td { border-bottom: none; }
+.ing-tabla .num { text-align: right; white-space: nowrap; }
+.um { color: var(--text-muted); font-size: .68rem; }
+.ing-badge {
+  display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px;
+  font-size: .65rem; font-weight: 700; background: #dcfce7; color: #15803d;
+}
+.clickable { cursor: pointer; }
+.merma-tabla .detalle-row td { background: var(--panel2); padding: 6px 16px 10px; }
 
 @media (max-width: 768px) {
   .merma-wrap { grid-template-columns: 1fr; }
-  .merma-tabla th:nth-child(5),
-  .merma-tabla td:nth-child(5) { display: none; }
+  .merma-tabla th:nth-child(6),
+  .merma-tabla td:nth-child(6) { display: none; }
 }
 </style>
