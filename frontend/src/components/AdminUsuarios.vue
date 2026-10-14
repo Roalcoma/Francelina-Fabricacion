@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { fabApi, type UsuarioAdmin, type Almacen, type Colaborador } from '../composables/useFabApi'
 
 const usuarios  = ref<UsuarioAdmin[]>([])
@@ -10,6 +10,31 @@ const editando  = ref<Record<number, UsuarioAdmin>>({})
 const msg       = ref<{ id: number; ok: boolean; text: string } | null>(null)
 const cargando  = ref(false)
 const errorCarga = ref('')
+
+// ── búsqueda y filtros (sobre lo guardado, no lo que se edita) ──
+const busqueda      = ref('')
+const filtroRol     = ref<'' | 'admin' | 'personal'>('')
+const filtroArea    = ref<'' | 'con' | 'sin'>('')
+const filtroFamilia = ref('')
+
+const familiasUsadas = computed(() =>
+  [...new Set(usuarios.value.map(u => u.familia_desc).filter((f): f is string => !!f))].sort()
+)
+
+const filtrados = computed(() => {
+  const q = busqueda.value.trim().toUpperCase()
+  return usuarios.value.filter(u =>
+    (!q || u.usuario.toUpperCase().includes(q) || (u.nombre_area || '').toUpperCase().includes(q)) &&
+    (!filtroRol.value || u.rol === filtroRol.value) &&
+    (!filtroArea.value || (filtroArea.value === 'con') === !!u.nombre_area) &&
+    (!filtroFamilia.value || u.familia_desc === filtroFamilia.value)
+  )
+})
+
+const hayFiltros = computed(() => !!(busqueda.value || filtroRol.value || filtroArea.value || filtroFamilia.value))
+function limpiarFiltros() {
+  busqueda.value = ''; filtroRol.value = ''; filtroArea.value = ''; filtroFamilia.value = ''
+}
 
 // ── colaboradores por área ───────────────────────────────
 const areaExpandida   = ref<number | null>(null)
@@ -92,7 +117,36 @@ async function guardar(cv: number) {
       <button class="btn-retry" @click="cargar">Reintentar</button>
     </div>
 
-    <div v-else class="tabla-wrap">
+    <div v-if="!cargando && !errorCarga" class="filtros">
+      <div class="buscador">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.3" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M20 20l-3.5-3.5"/>
+        </svg>
+        <input v-model="busqueda" type="search" placeholder="Buscar por usuario o área…" aria-label="Buscar usuario"/>
+      </div>
+      <select v-model="filtroRol" class="filtro-select" aria-label="Filtrar por rol">
+        <option value="">Todos los roles</option>
+        <option value="admin">Admin</option>
+        <option value="personal">Personal</option>
+      </select>
+      <select v-model="filtroArea" class="filtro-select" aria-label="Filtrar por área">
+        <option value="">Con y sin área</option>
+        <option value="con">Con área</option>
+        <option value="sin">Sin área</option>
+      </select>
+      <select v-model="filtroFamilia" class="filtro-select" aria-label="Filtrar por familia">
+        <option value="">Todas las familias</option>
+        <option v-for="f in familiasUsadas" :key="f" :value="f">{{ f }}</option>
+      </select>
+      <span class="filtro-conteo">{{ filtrados.length }} de {{ usuarios.length }}</span>
+      <button v-if="hayFiltros" class="btn-limpiar" @click="limpiarFiltros">Limpiar</button>
+    </div>
+
+    <div v-if="!cargando && !errorCarga && !filtrados.length" class="admin-estado">
+      Ningún usuario coincide con la búsqueda.
+    </div>
+
+    <div v-else-if="!cargando && !errorCarga" class="tabla-wrap">
       <table class="tabla">
         <thead>
           <tr>
@@ -107,7 +161,7 @@ async function guardar(cv: number) {
           </tr>
         </thead>
         <tbody>
-          <template v-for="u in usuarios" :key="u.codvendedor">
+          <template v-for="u in filtrados" :key="u.codvendedor">
           <tr>
             <td class="td-user">{{ u.usuario }}</td>
 
@@ -191,6 +245,30 @@ async function guardar(cv: number) {
 .admin-header { display: flex; flex-direction: column; gap: 4px; }
 .admin-title  { font-size: .95rem; font-weight: 700; color: var(--text); margin: 0; }
 .admin-sub    { font-size: .75rem; color: var(--text-muted); margin: 0; }
+
+.filtros { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.buscador {
+  display: flex; align-items: center; gap: 6px; flex: 1 1 240px; max-width: 340px;
+  padding: 0 10px; border-radius: 10px; border: 1.5px solid var(--border);
+  background: var(--panel2); color: var(--text-muted);
+}
+.buscador:focus-within { border-color: #16a34a; }
+.buscador input {
+  flex: 1; min-width: 0; width: auto; border: none; box-shadow: none; background: none; outline: none;
+  padding: 7px 0; font-size: .8rem; color: var(--text); font-family: inherit;
+}
+.filtro-select {
+  width: auto; flex: 0 1 auto;
+  padding: 7px 10px; border-radius: 10px; font-size: .78rem; cursor: pointer;
+  border: 1.5px solid var(--border); background: var(--panel2); color: var(--text); font-family: inherit;
+}
+.filtro-select:focus { outline: none; border-color: #16a34a; }
+.filtro-conteo { font-size: .72rem; color: var(--text-muted); margin-left: auto; }
+.btn-limpiar {
+  padding: 6px 12px; border-radius: 10px; font-size: .75rem; font-weight: 600; cursor: pointer;
+  border: 1.5px solid var(--border); background: var(--panel); color: var(--text-muted); font-family: inherit;
+}
+.btn-limpiar:hover { color: var(--text); border-color: var(--text-muted); }
 
 .tabla-wrap { overflow-x: auto; border-radius: 14px; border: 1.5px solid var(--border); }
 .tabla { width: 100%; border-collapse: collapse; font-size: .78rem; }

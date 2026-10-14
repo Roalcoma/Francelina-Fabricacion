@@ -26,7 +26,7 @@ export interface Componente { LINEAKIT: number; CODARTKIT: number; DESCRIPCION: 
 export interface Operario  { CODVENDEDOR: number; NOMVENDEDOR: string }
 export interface Almacen   { CODALMACEN: string; NOMBREALMACEN: string }
 export interface Stats     { total_ordenes: number; total_unidades: number; productos_distintos: number; operarios_activos: number }
-export interface Fabricacion { id: number; hora: string; codarticulo: number; descripcion: string; unidades: number; codvendedor: number; nombre_operario: string; codalmacen: string; observaciones: string; sin_stock: number; estado: 'pendiente' | 'aprobado' | 'cancelado' | 'ICG' }
+export interface Fabricacion { id: number; fecha: string; hora: string; codarticulo: number; descripcion: string; unidades: number; codvendedor: number; nombre_operario: string; codalmacen: string; observaciones: string; sin_stock: number; estado: 'pendiente' | 'aprobado' | 'cancelado' | 'ICG' }
 export interface ComponenteFab { codarticulo: number; descripcion: string; unidades_kit: number; unidades_total: number; stock_inicial: number | null; merma_pct: number }
 export interface StockItem      { CODARTICULO: number; STOCK: number }
 export interface AuthUser       { CODUSUARIO: number; USUARIO: string; CODVENDEDOR: number; rol: 'personal' | 'admin'; token: string }
@@ -58,6 +58,8 @@ export const fabApi = {
     if (codvendedor) url += `&codvendedor=${codvendedor}`
     return apiFetch<Fabricacion[]>(url)
   },
+  fabricacionesRango: (desde: string, hasta: string) =>
+    apiFetch<Fabricacion[]>(`/fab/fabricaciones?desde=${desde}&hasta=${hasta}`),
   componentes:  (id: number)         => apiFetch<ComponenteFab[]>(`/fab/fabricacion/${id}/componentes`),
   stock:        (codalmacen: string, articulos: string) =>
     apiFetch<StockItem[]>(`/fab/stock?codalmacen=${encodeURIComponent(codalmacen)}&articulos=${encodeURIComponent(articulos)}`),

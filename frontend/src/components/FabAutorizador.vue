@@ -2,17 +2,21 @@
 import { ref, computed, onMounted } from 'vue'
 import { fabApi, fechaLocal, type Fabricacion } from '../composables/useFabApi'
 
-const fecha      = ref(fechaLocal())
+const desde      = ref(fechaLocal())
+const hasta      = ref(fechaLocal())
 const filas      = ref<Fabricacion[]>([])
 const cargando   = ref(false)
 const filtroEstado = ref<'todos' | Fabricacion['estado']>('todos')
 const actualizando = ref<Set<number>>(new Set())
 
 async function cargar() {
+  if (!desde.value || !hasta.value || desde.value > hasta.value) return
   cargando.value = true
-  try { filas.value = await fabApi.fabricaciones(fecha.value) }
+  try { filas.value = await fabApi.fabricacionesRango(desde.value, hasta.value) }
   finally { cargando.value = false }
 }
+
+const fmtFecha = (iso: string) => iso.split('-').reverse().join('/')
 
 async function setEstado(f: Fabricacion, estado: 'aprobado' | 'cancelado' | 'pendiente') {
   if (actualizando.value.has(f.id)) return
@@ -47,7 +51,14 @@ onMounted(cargar)
 <template>
   <div class="aut-wrap">
     <div class="aut-toolbar">
-      <input type="date" v-model="fecha" @change="cargar" class="date-pick"/>
+      <div class="rango">
+        <label class="rango-label">Desde
+          <input type="date" v-model="desde" :max="hasta" @change="cargar" class="date-pick"/>
+        </label>
+        <label class="rango-label">Hasta
+          <input type="date" v-model="hasta" :min="desde" @change="cargar" class="date-pick"/>
+        </label>
+      </div>
 
       <div class="chips">
         <button :class="['chip', { active: filtroEstado === 'todos' }]" @click="filtroEstado = 'todos'">
@@ -75,13 +86,13 @@ onMounted(cargar)
     </div>
 
     <div v-if="cargando" class="aut-empty">Cargando…</div>
-    <div v-else-if="!visibles.length" class="aut-empty">Sin registros para esta fecha.</div>
+    <div v-else-if="!visibles.length" class="aut-empty">Sin registros en este rango.</div>
 
     <div v-else class="aut-table-wrap">
       <table class="aut-table">
         <thead>
           <tr>
-            <th>Hora</th>
+            <th>Fecha</th>
             <th>Artículo</th>
             <th>Descripción</th>
             <th>Uds.</th>
@@ -93,7 +104,7 @@ onMounted(cargar)
         </thead>
         <tbody>
           <tr v-for="f in visibles" :key="f.id" :class="['fab-row', `row-${f.estado}`]">
-            <td class="mono">{{ f.hora }}</td>
+            <td class="mono nowrap">{{ fmtFecha(f.fecha) }} <span class="hora">{{ f.hora }}</span></td>
             <td class="mono">{{ f.codarticulo }}</td>
             <td>{{ f.descripcion }}</td>
             <td class="mono center">{{ f.unidades }}</td>
@@ -146,6 +157,15 @@ onMounted(cargar)
   border: 1.5px solid var(--border); background: var(--panel2);
   color: var(--text); font-family: inherit;
 }
+
+.rango { display: flex; gap: 8px; flex-wrap: wrap; }
+.rango-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: .7rem; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.nowrap { white-space: nowrap; }
+.hora   { color: var(--text-muted); margin-left: 4px; }
 
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 

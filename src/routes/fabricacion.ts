@@ -320,24 +320,26 @@ fabRouter.get('/stats', wrap(async (req, res) => {
     res.json(r.recordset[0]);
 }));
 
-// ── GET /fab/fabricaciones?fecha=&codvendedor= ────────────
+// ── GET /fab/fabricaciones?fecha= | ?desde=&hasta= ; &codvendedor= ──
 fabRouter.get('/fabricaciones', wrap(async (req, res) => {
-    const fecha       = (req.query.fecha as string) || hoy();
+    const desde       = (req.query.desde as string) || (req.query.fecha as string) || hoy();
+    const hasta       = (req.query.hasta as string) || desde;
     const codvendedor = req.query.codvendedor ? parseInt(req.query.codvendedor as string) : null;
     const pool        = await getPool(FAB);
 
-    const rq = pool.request().input('f', sql.Date, fecha);
+    const rq = pool.request().input('d', sql.Date, desde).input('h', sql.Date, hasta);
     if (codvendedor !== null) rq.input('v', sql.Int, codvendedor);
 
     const r = await rq.query(`
-        SELECT f.id, CONVERT(varchar(5), f.hora, 108) AS hora, f.codarticulo, f.descripcion, f.unidades,
+        SELECT f.id, CONVERT(varchar(10), f.fecha, 23) AS fecha, CONVERT(varchar(5), f.hora, 108) AS hora,
+               f.codarticulo, f.descripcion, f.unidades,
                f.codvendedor, f.nombre_operario, f.codalmacen, f.observaciones,
                ISNULL(f.sin_stock, 0) AS sin_stock,
                ISNULL(f.estado, 'pendiente') AS estado
         FROM fabricaciones f
-        WHERE f.fecha=@f
+        WHERE f.fecha BETWEEN @d AND @h
           ${codvendedor !== null ? 'AND f.codvendedor=@v' : ''}
-        ORDER BY f.hora DESC
+        ORDER BY f.fecha DESC, f.hora DESC
     `);
     res.json(r.recordset);
 }));
