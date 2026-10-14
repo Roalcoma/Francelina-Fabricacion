@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, computed } from 'vue'
-import { fabApi, type StockRecetasRow } from '../composables/useFabApi'
+import { fabApi, fechaLocal, type StockRecetasRow } from '../composables/useFabApi'
 
-const today = new Date().toISOString().split('T')[0]
-const desde = ref(new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().split('T')[0])
+const today = fechaLocal()
+const desde = ref(fechaLocal(new Date(new Date().setDate(new Date().getDate() - 29))))
 const hasta = ref(today)
 
 const loading     = ref(false)

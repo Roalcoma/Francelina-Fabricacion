@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { fabApi } from '../composables/useFabApi'
+import { fabApi, type AuthUser } from '../composables/useFabApi'
 
-const emit = defineEmits<{ (e: 'login', user: { CODUSUARIO: number; USUARIO: string }): void }>()
+const emit = defineEmits<{ (e: 'login', user: AuthUser): void }>()
 
 const clave   = ref('')
 const loading = ref(false)

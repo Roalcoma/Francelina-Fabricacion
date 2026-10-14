@@ -21,7 +21,7 @@ const filteredRecetas = computed(() => {
   const q = recetaSearch.value.toUpperCase().trim()
   if (!q) return recetas.value
   return recetas.value.filter(r =>
-    r.REFPROVEEDOR.toUpperCase().includes(q) || r.DESCRIPCION.includes(q)
+    r.REFPROVEEDOR.toUpperCase().includes(q) || r.DESCRIPCION.toUpperCase().includes(q)
   )
 })
 
@@ -100,10 +100,9 @@ const stockInsuficiente = computed(() =>
 
 // ── mount ───────────────────────────────────────────
 onMounted(async () => {
-  const [alms, cfg, area, colabs] = await Promise.all([
+  const [alms, cfg, colabs] = await Promise.all([
     fabApi.almacenes(),
     fabApi.getConfig(props.user.CODVENDEDOR),
-    fabApi.areaUsuario(props.user.CODUSUARIO),
     fabApi.colaboradores(props.user.CODUSUARIO),
   ])
   almacenes.value     = alms
@@ -198,7 +197,6 @@ async function registrar() {
       codarticulo:     receta.value.CODARTICULO,
       descripcion:     receta.value.DESCRIPCION,
       unidades:        unidades.value,
-      codvendedor:     props.user.CODVENDEDOR || props.user.CODUSUARIO,
       nombre_operario: operarioNombre.value,
       codalmacen:          codalmacen.value,
       codalmacen_destino:  codalmacen_destino.value,

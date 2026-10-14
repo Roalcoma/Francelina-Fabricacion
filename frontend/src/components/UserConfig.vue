@@ -18,17 +18,23 @@ async function iniciarUpdate() {
     await fabApi.update(updateUrl.value)
   } catch { /* servidor puede no responder si ya reinició */ }
   updateStatus.value = 'reconnecting'
-  // Polling hasta que el backend responda de nuevo
+  // el servidor sigue arriba mientras descarga y compila: esperar a que caiga y vuelva
+  let cayo = false
   const poll = setInterval(async () => {
     try {
       await fetch('/fab/almacenes')
+      if (!cayo) return
       clearInterval(poll)
       updateStatus.value = 'done'
       setTimeout(() => window.location.reload(), 1000)
-    } catch { /* aún reiniciando */ }
+    } catch { cayo = true }
   }, 2000)
-  // Timeout de seguridad: 60s
-  setTimeout(() => { clearInterval(poll); if (updateStatus.value === 'reconnecting') updateStatus.value = 'error'; updateError.value = 'Tiempo de espera agotado. Recarga la página manualmente.' }, 60000)
+  setTimeout(() => {
+    clearInterval(poll)
+    if (updateStatus.value !== 'reconnecting') return
+    updateStatus.value = 'error'
+    updateError.value = 'Tiempo de espera agotado. Recarga la página manualmente.'
+  }, 180000)
 }
 
 const props = defineProps<{ user: AuthUser }>()

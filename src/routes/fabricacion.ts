@@ -1,9 +1,11 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import * as sql from 'mssql';
 import { getPool } from '../config/db';
 import { encriptacion } from '../utils/encriptacion';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as crypto from 'crypto';
 
 export const fabRouter = Router();
 
@@ -96,6 +98,13 @@ export async function migrateFab() {
         )
         EXEC sp_rename 'areas.numdpto', 'numseccion', 'COLUMN';
 
+        -- una sola área activa por usuario: conserva la más reciente
+        UPDATE a SET activo=0 FROM areas a
+        WHERE a.activo=1 AND EXISTS (SELECT 1 FROM areas b WHERE b.codvendedor=a.codvendedor AND b.activo=1 AND b.id>a.id);
+
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_areas_codvendedor_activo')
+        CREATE UNIQUE INDEX UX_areas_codvendedor_activo ON areas(codvendedor) WHERE activo=1;
+
         IF OBJECT_ID('colaboradores') IS NULL
         CREATE TABLE colaboradores (
             id          INT IDENTITY PRIMARY KEY,
@@ -103,15 +112,6 @@ export async function migrateFab() {
             nombre      NVARCHAR(100) NOT NULL,
             activo      BIT           NOT NULL DEFAULT 1
         );
-
-        IF NOT EXISTS (
-            SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_NAME='colaboradores' AND COLUMN_NAME='area_id'
-        )
-        BEGIN
-            ALTER TABLE colaboradores ADD area_id INT NULL;
-            EXEC('UPDATE c SET c.area_id = a.id FROM colaboradores c JOIN areas a ON a.codvendedor=c.codvendedor AND a.activo=1');
-        END
 
         IF EXISTS (
             SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
@@ -142,6 +142,50 @@ function wrap(fn: (req: Request, res: Response) => Promise<void>) {
     };
 }
 
+const hoy = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+// ── sesión: token firmado con HMAC ────────────────────────
+type Sesion = { cv: number; rol: string; exp: number };
+
+const SECRET_FILE = path.join(__dirname, '../../.fab_secret');
+const SECRET = process.env.FAB_SECRET || (() => {
+    try { return fs.readFileSync(SECRET_FILE, 'utf8').trim(); }
+    catch {
+        const s = crypto.randomBytes(32).toString('hex');
+        fs.writeFileSync(SECRET_FILE, s);
+        return s;
+    }
+})();
+
+const firmar = (data: string) => crypto.createHmac('sha256', SECRET).update(data).digest('base64url');
+
+function crearToken(cv: number, rol: string) {
+    const data = Buffer.from(JSON.stringify({ cv, rol, exp: Date.now() + 7 * 864e5 })).toString('base64url');
+    return `${data}.${firmar(data)}`;
+}
+
+function leerToken(token = ''): Sesion | null {
+    const [data, firma] = token.split('.');
+    if (!data || !firma) return null;
+    const esperada = firmar(data);
+    if (firma.length !== esperada.length || !crypto.timingSafeEqual(Buffer.from(firma), Buffer.from(esperada))) return null;
+    const s = JSON.parse(Buffer.from(data, 'base64url').toString()) as Sesion;
+    return s.exp > Date.now() ? s : null;
+}
+
+const sesion = (req: Request) => (req as any).sesion as Sesion;
+
+fabRouter.use((req, res, next) => {
+    if (req.path === '/login') return next();
+    const s = leerToken(req.headers.authorization?.replace(/^Bearer /, ''));
+    if (!s) return void res.status(401).json({ error: 'Sesión inválida o expirada' });
+    (req as any).sesion = s;
+    next();
+});
+
+const soloAdmin = (req: Request, res: Response, next: NextFunction) =>
+    sesion(req).rol === 'admin' ? next() : void res.status(403).json({ error: 'Solo administradores' });
+
 // ── POST /fab/login ───────────────────────────────────────
 fabRouter.post('/login', wrap(async (req, res) => {
     const { clave } = req.body as { clave: string };
@@ -164,13 +208,21 @@ fabRouter.post('/login', wrap(async (req, res) => {
     const fabPool = await getPool(FAB);
     const rolR = await fabPool.request()
         .input('cv', sql.Int, user.CODVENDEDOR)
-        .query(`SELECT TOP 1 ISNULL(rol,'personal') AS rol FROM areas WHERE codvendedor=@cv AND activo=1`);
-    res.json({ ...user, rol: rolR.recordset[0]?.rol ?? 'personal' });
+        .query(`SELECT TOP 1 ISNULL(rol,'personal') AS rol FROM areas WHERE codvendedor=@cv AND activo=1 ORDER BY id DESC`);
+    const rol = rolR.recordset[0]?.rol ?? 'personal';
+    res.json({ ...user, rol, token: crearToken(user.CODUSUARIO, rol) });
 }));
 
-// ── GET /fab/recetas?buscar=&familia= ────────────────────
+// ── GET /fab/recetas?familia= ─────────────────────────────
+// personal: la familia sale de su área, no del cliente
 fabRouter.get('/recetas', wrap(async (req, res) => {
-    const familia = (req.query.familia as string) || null;
+    const s = sesion(req);
+    let familia = (req.query.familia as string) || null;
+    if (s.rol !== 'admin') {
+        const a = await (await getPool(FAB)).request().input('cv', sql.Int, s.cv)
+            .query(`SELECT TOP 1 familia_desc FROM areas WHERE codvendedor=@cv AND activo=1 ORDER BY id DESC`);
+        familia = a.recordset[0]?.familia_desc ?? null;
+    }
     const pool    = await getPool(LOCO);
     const rq = pool.request();
     if (familia) rq.input('fam', sql.NVarChar(100), familia);
@@ -252,7 +304,7 @@ fabRouter.get('/almacenes', wrap(async (req, res) => {
 
 // ── GET /fab/stats?fecha= ─────────────────────────────────
 fabRouter.get('/stats', wrap(async (req, res) => {
-    const fecha = (req.query.fecha as string) || new Date().toISOString().split('T')[0];
+    const fecha = (req.query.fecha as string) || hoy();
     const pool  = await getPool(FAB);
     const r = await pool.request()
         .input('f', sql.Date, fecha)
@@ -269,7 +321,7 @@ fabRouter.get('/stats', wrap(async (req, res) => {
 
 // ── GET /fab/fabricaciones?fecha=&codvendedor= ────────────
 fabRouter.get('/fabricaciones', wrap(async (req, res) => {
-    const fecha       = (req.query.fecha as string) || new Date().toISOString().split('T')[0];
+    const fecha       = (req.query.fecha as string) || hoy();
     const codvendedor = req.query.codvendedor ? parseInt(req.query.codvendedor as string) : null;
     const pool        = await getPool(FAB);
 
@@ -290,7 +342,7 @@ fabRouter.get('/fabricaciones', wrap(async (req, res) => {
 }));
 
 // ── PATCH /fab/fabricaciones/:id/estado ──────────────────
-fabRouter.patch('/fabricaciones/:id/estado', wrap(async (req, res) => {
+fabRouter.patch('/fabricaciones/:id/estado', soloAdmin, wrap(async (req, res) => {
     const id     = parseInt(req.params.id as string);
     const estado = (req.body as { estado: string }).estado;
     if (!['pendiente', 'aprobado', 'cancelado'].includes(estado))
@@ -314,10 +366,9 @@ fabRouter.get('/fabricacion/:id/componentes', wrap(async (req, res) => {
 }));
 
 // ── GET /fab/dashboard?desde=&hasta= ─────────────────────
-fabRouter.get('/dashboard', wrap(async (req, res) => {
-    const hoy   = new Date().toISOString().split('T')[0];
-    const desde = (req.query.desde as string) || hoy;
-    const hasta = (req.query.hasta as string) || hoy;
+fabRouter.get('/dashboard', soloAdmin, wrap(async (req, res) => {
+    const desde = (req.query.desde as string) || hoy();
+    const hasta = (req.query.hasta as string) || hoy();
     const pool  = await getPool(FAB);
     const r = await pool.request()
         .input('d', sql.Date, desde)
@@ -348,11 +399,10 @@ fabRouter.get('/dashboard', wrap(async (req, res) => {
 }));
 
 // ── GET /fab/stock-resumen?codalmacen=&desde=&hasta= ──────
-fabRouter.get('/stock-resumen', wrap(async (req, res) => {
+fabRouter.get('/stock-resumen', soloAdmin, wrap(async (req, res) => {
     const codalmacen = (req.query.codalmacen as string) || '';
-    const hoy   = new Date().toISOString().split('T')[0];
-    const desde = (req.query.desde as string) || hoy;
-    const hasta = (req.query.hasta as string) || hoy;
+    const desde = (req.query.desde as string) || hoy();
+    const hasta = (req.query.hasta as string) || hoy();
 
     if (!codalmacen) return void res.json([]);
 
@@ -422,7 +472,7 @@ fabRouter.get('/config', wrap(async (req, res) => {
 }));
 
 // ── POST /fab/config ──────────────────────────────────────
-fabRouter.post('/config', wrap(async (req, res) => {
+fabRouter.post('/config', soloAdmin, wrap(async (req, res) => {
     const { codvendedor, almacen_origen, almacen_destino } = req.body as {
         codvendedor: number; almacen_origen: string; almacen_destino: string;
     };
@@ -441,7 +491,7 @@ fabRouter.post('/config', wrap(async (req, res) => {
 }));
 
 // ── GET /fab/stock-recetas ────────────────────────────────
-fabRouter.get('/stock-recetas', wrap(async (req, res) => {
+fabRouter.get('/stock-recetas', soloAdmin, wrap(async (req, res) => {
     const pool = await getPool(LOCO);
     const r = await pool.request().query(`
         SELECT a.CODARTICULO, a.DESCRIPCION, ISNULL(s.CODALMACEN,'') AS CODALMACEN,
@@ -473,14 +523,15 @@ fabRouter.get('/stock-recetas', wrap(async (req, res) => {
 
 // ── POST /fab/fabricaciones ───────────────────────────────
 fabRouter.post('/fabricaciones', wrap(async (req, res) => {
-    const { codarticulo, descripcion, unidades, codvendedor, nombre_operario, codalmacen, codalmacen_destino, observaciones, componentes } = req.body as {
+    const { codarticulo, descripcion, unidades, nombre_operario, codalmacen, codalmacen_destino, observaciones, componentes } = req.body as {
         codarticulo: number; descripcion: string; unidades: number;
-        codvendedor: number; nombre_operario: string; codalmacen: string; codalmacen_destino: string;
+        nombre_operario: string; codalmacen: string; codalmacen_destino: string;
         observaciones: string; componentes: Array<{ CODARTKIT: number; DESCRIPCION: string; UDS_KIT: number; stock_inicial?: number | null; merma_pct?: number }>;
     };
+    const codvendedor = sesion(req).cv;
 
-    if (!codarticulo || !unidades || codvendedor == null) {
-        return void res.status(400).json({ error: 'Faltan: codarticulo, unidades, codvendedor' });
+    if (!codarticulo || !unidades) {
+        return void res.status(400).json({ error: 'Faltan: codarticulo, unidades' });
     }
 
     // sin_stock: almacén seleccionado y algún ingrediente con stock insuficiente
@@ -501,7 +552,7 @@ fabRouter.post('/fabricaciones', wrap(async (req, res) => {
             .input('uds', sql.Float,         unidades)
             .input('cv',  sql.Int,           codvendedor)
             .input('nom', sql.NVarChar(100), nombre_operario || '')
-            .input('alm', sql.NVarChar(3),   codalmacen || '')
+            .input('alm', sql.NVarChar(10),  codalmacen || '')
             .input('ald', sql.NVarChar(10),  codalmacen_destino || '')
             .input('obs', sql.NVarChar(500), observaciones || '')
             .input('ss',  sql.Bit,           sinStock ? 1 : 0)
@@ -512,7 +563,6 @@ fabRouter.post('/fabricaciones', wrap(async (req, res) => {
             `);
 
         const { id, hora } = ir.recordset[0];
-        const fabPool = await getPool(FAB);
 
         for (const c of (componentes || [])) {
             const si       = c.stock_inicial != null ? c.stock_inicial : null;
@@ -529,8 +579,7 @@ fabRouter.post('/fabricaciones', wrap(async (req, res) => {
                 .query(`INSERT INTO fabricaciones_componentes (id_fabricacion, codarticulo, descripcion, unidades_kit, unidades_total, stock_inicial, merma_pct)
                         VALUES (@ifab, @ca, @des, @ukit, @utot, @si, @mp)`);
 
-            // persistir config de merma para este componente
-            await fabPool.request()
+            await new sql.Request(tx)
                 .input('ca', sql.Int,   codarticulo)
                 .input('ck', sql.Int,   c.CODARTKIT)
                 .input('mp', sql.Float, merma)
@@ -580,30 +629,34 @@ fabRouter.get('/areas/usuario', wrap(async (req, res) => {
     const cv   = parseInt(req.query.codvendedor as string);
     const pool = await getPool(FAB);
     const r    = await pool.request().input('cv', sql.Int, cv)
-        .query(`SELECT TOP 1 id, nombre, numseccion, familia_desc, ISNULL(rol,'personal') AS rol FROM areas WHERE codvendedor=@cv AND activo=1`);
+        .query(`SELECT TOP 1 id, nombre, numseccion, familia_desc, ISNULL(rol,'personal') AS rol FROM areas WHERE codvendedor=@cv AND activo=1 ORDER BY id DESC`);
     res.json(r.recordset[0] || null);
 }));
 
 // ── POST /fab/areas ───────────────────────────────────────
-fabRouter.post('/areas', wrap(async (req, res) => {
-    const { nombre, numseccion, codvendedor, familia_desc, rol } = req.body as { nombre: string; numseccion?: number; codvendedor: number; familia_desc?: string; rol?: string };
+fabRouter.post('/areas', soloAdmin, wrap(async (req, res) => {
+    const { nombre, numseccion, codvendedor, familia_desc } = req.body as { nombre: string; numseccion?: number; codvendedor: number; familia_desc?: string };
     if (!nombre?.trim() || codvendedor == null)
         return void res.status(400).json({ error: 'nombre y codvendedor requeridos' });
     const pool = await getPool(FAB);
-    await pool.request().input('cv', sql.Int, codvendedor)
-        .query(`UPDATE areas SET activo=0 WHERE codvendedor=@cv`);
     const r = await pool.request()
         .input('nom', sql.NVarChar(100), nombre.trim())
         .input('sec', sql.Int, numseccion ?? 0)
         .input('cv',  sql.Int, codvendedor)
         .input('fam', sql.NVarChar(100), familia_desc?.trim() || null)
-        .input('rol', sql.NVarChar(20),  rol || 'personal')
-        .query(`INSERT INTO areas (nombre, numseccion, codvendedor, familia_desc, rol) OUTPUT INSERTED.id VALUES (@nom, @sec, @cv, @fam, @rol)`);
+        .query(`
+            MERGE areas AS t
+            USING (SELECT @cv AS codvendedor) AS s ON t.codvendedor=s.codvendedor AND t.activo=1
+            WHEN MATCHED     THEN UPDATE SET nombre=@nom, numseccion=@sec, familia_desc=@fam
+            WHEN NOT MATCHED THEN INSERT (nombre, numseccion, codvendedor, familia_desc, activo)
+                                  VALUES (@nom, @sec, @cv, @fam, 1)
+            OUTPUT INSERTED.id;
+        `);
     res.json({ ok: true, id: r.recordset[0].id });
 }));
 
 // ── DELETE /fab/areas/:id ─────────────────────────────────
-fabRouter.delete('/areas/:id', wrap(async (req, res) => {
+fabRouter.delete('/areas/:id', soloAdmin, wrap(async (req, res) => {
     const pool = await getPool(FAB);
     await pool.request().input('id', sql.Int, parseInt(req.params.id as string))
         .query(`UPDATE areas SET activo=0 WHERE id=@id`);
@@ -621,7 +674,7 @@ fabRouter.get('/colaboradores', wrap(async (req, res) => {
 }));
 
 // ── POST /fab/colaboradores ───────────────────────────────
-fabRouter.post('/colaboradores', wrap(async (req, res) => {
+fabRouter.post('/colaboradores', soloAdmin, wrap(async (req, res) => {
     const { codvendedor, nombre } = req.body as { codvendedor: number; nombre: string };
     if (codvendedor == null || !nombre?.trim())
         return void res.status(400).json({ error: 'codvendedor y nombre requeridos' });
@@ -634,7 +687,7 @@ fabRouter.post('/colaboradores', wrap(async (req, res) => {
 }));
 
 // ── DELETE /fab/colaboradores/:id ─────────────────────────
-fabRouter.delete('/colaboradores/:id', wrap(async (req, res) => {
+fabRouter.delete('/colaboradores/:id', soloAdmin, wrap(async (req, res) => {
     const id   = parseInt(req.params.id as string);
     const pool = await getPool(FAB);
     await pool.request().input('id', sql.Int, id)
@@ -644,7 +697,7 @@ fabRouter.delete('/colaboradores/:id', wrap(async (req, res) => {
 
 // ── GET /fab/mermas?fecha= ────────────────────────────────
 fabRouter.get('/mermas', wrap(async (req, res) => {
-    const fecha = (req.query.fecha as string) || new Date().toISOString().split('T')[0];
+    const fecha = (req.query.fecha as string) || hoy();
     const pool  = await getPool(FAB);
     const r = await pool.request()
         .input('f', sql.Date, fecha)
@@ -656,9 +709,10 @@ fabRouter.get('/mermas', wrap(async (req, res) => {
 
 // ── POST /fab/mermas ──────────────────────────────────────
 fabRouter.post('/mermas', wrap(async (req, res) => {
-    const { codarticulo, descripcion, cantidad, motivo, codvendedor, nombre_operario } =
-        req.body as { codarticulo: number; descripcion: string; cantidad: number; motivo: string; codvendedor: number; nombre_operario: string };
-    if (!codarticulo || !cantidad || !motivo || codvendedor == null)
+    const { codarticulo, descripcion, cantidad, motivo, nombre_operario } =
+        req.body as { codarticulo: number; descripcion: string; cantidad: number; motivo: string; nombre_operario: string };
+    const codvendedor = sesion(req).cv;
+    if (!codarticulo || !cantidad || !motivo)
         return void res.status(400).json({ error: 'Faltan campos requeridos' });
     const pool = await getPool(FAB);
     const r = await pool.request()
@@ -675,7 +729,7 @@ fabRouter.post('/mermas', wrap(async (req, res) => {
 }));
 
 // ── GET /fab/admin/usuarios ───────────────────────────────────────
-fabRouter.get('/admin/usuarios', wrap(async (req, res) => {
+fabRouter.get('/admin/usuarios', soloAdmin, wrap(async (req, res) => {
     const [locoPool, fabPool] = await Promise.all([getPool(USUARIOS_DB), getPool(FAB)]);
     const [usuariosR, areasR, configsR] = await Promise.all([
         locoPool.request().query(`
@@ -693,7 +747,6 @@ fabRouter.get('/admin/usuarios', wrap(async (req, res) => {
     res.json(usuariosR.recordset.map(u => ({
         codvendedor:     u.CODUSUARIO,
         usuario:         u.USUARIO,
-        area_id:         areaMap[u.CODUSUARIO]?.id              ?? null,
         rol:             areaMap[u.CODUSUARIO]?.rol             ?? 'personal',
         nombre_area:     areaMap[u.CODUSUARIO]?.nombre          ?? '',
         familia_desc:    areaMap[u.CODUSUARIO]?.familia_desc    ?? null,
@@ -703,7 +756,7 @@ fabRouter.get('/admin/usuarios', wrap(async (req, res) => {
 }));
 
 // ── PUT /fab/admin/usuarios/:codvendedor ──────────────────────────
-fabRouter.put('/admin/usuarios/:codvendedor', wrap(async (req, res) => {
+fabRouter.put('/admin/usuarios/:codvendedor', soloAdmin, wrap(async (req, res) => {
     const cv = parseInt(req.params.codvendedor as string);
     const { rol, nombre_area, familia_desc, almacen_origen, almacen_destino } = req.body as {
         rol: string; nombre_area: string; familia_desc?: string | null;
@@ -743,20 +796,19 @@ fabRouter.put('/admin/usuarios/:codvendedor', wrap(async (req, res) => {
 }));
 
 // ── Actualización desde ZIP de GitHub ──────────────────────────────
-fabRouter.post('/update', (async (req: Request, res: Response) => {
+fabRouter.post('/update', soloAdmin, (async (req: Request, res: Response) => {
     const { url } = req.body as { url?: string };
-    if (!url || !url.startsWith('https://')) {
-        return res.status(400).json({ error: 'URL inválida. Debe ser https://...' });
+    if (!url || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/archive\/refs\/heads\/[\w.-]+\.zip$/.test(url)) {
+        return res.status(400).json({ error: 'URL inválida. Debe ser https://github.com/<usuario>/<repo>/archive/refs/heads/<rama>.zip' });
     }
 
     const script = path.join(__dirname, '../../update.ps1');
-    const cmd    = `powershell -ExecutionPolicy Bypass -File "${script}" -Url "${url}"`;
 
     res.json({ ok: true, mensaje: 'Actualización iniciada. El servidor se reiniciará en segundos.' });
 
-    // ejecutar después de responder
+    // ejecutar después de responder; execFile no pasa por shell
     setTimeout(() => {
-        exec(cmd, (err, stdout, stderr) => {
+        execFile('powershell', ['-ExecutionPolicy', 'Bypass', '-File', script, '-Url', url], (err, stdout, stderr) => {
             if (err) console.error('[update] Error:', stderr || err.message);
             else      console.log('[update]', stdout);
             process.exit(0); // nodemon reinicia automáticamente

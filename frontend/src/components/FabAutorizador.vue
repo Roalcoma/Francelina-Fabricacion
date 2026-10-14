@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { fabApi, type Fabricacion } from '../composables/useFabApi'
+import { fabApi, fechaLocal, type Fabricacion } from '../composables/useFabApi'
 
-const fecha      = ref(new Date().toISOString().split('T')[0])
+const fecha      = ref(fechaLocal())
 const filas      = ref<Fabricacion[]>([])
 const cargando   = ref(false)
 const filtroEstado = ref<'todos' | 'pendiente' | 'aprobado' | 'cancelado'>('todos')

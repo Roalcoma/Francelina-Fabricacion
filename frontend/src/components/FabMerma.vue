@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import { fabApi, type Receta, type Merma, type AuthUser } from '../composables/useFabApi'
+import { fabApi, fechaLocal, type Receta, type Merma, type AuthUser } from '../composables/useFabApi'
 
 const props = defineProps<{ user: AuthUser; colaborador?: { id: number; nombre: string } | null; familia_desc?: string | null }>()
 
@@ -14,14 +14,15 @@ const guardando   = ref(false)
 const guardadoOk  = ref(false)
 const errorMsg    = ref('')
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
+const recetas = ref<Receta[]>([])
+watch(() => props.familia_desc, async fam => { recetas.value = await fabApi.recetas(fam) }, { immediate: true })
+
 watch(buscar, val => {
   articulo.value = null
-  if (searchTimer) clearTimeout(searchTimer)
-  if (!val.trim()) { sugerencias.value = []; return }
-  searchTimer = setTimeout(async () => {
-    sugerencias.value = await fabApi.recetas(props.familia_desc)
-  }, 300)
+  const q = val.trim().toUpperCase()
+  sugerencias.value = q
+    ? recetas.value.filter(r => r.DESCRIPCION.toUpperCase().includes(q) || r.REFPROVEEDOR.toUpperCase().includes(q))
+    : []
 })
 
 function elegirArticulo(r: Receta) {
@@ -45,7 +46,6 @@ async function registrar() {
       descripcion:     articulo.value.DESCRIPCION,
       cantidad:        Number(cantidad.value),
       motivo:          motivo.value.trim(),
-      codvendedor:     props.user.CODVENDEDOR,
       nombre_operario: props.colaborador?.nombre ?? props.user.USUARIO,
     })
     guardadoOk.value = true
@@ -60,7 +60,7 @@ async function registrar() {
 }
 
 // ── lista ─────────────────────────────────────────────────
-const fecha  = ref(new Date().toISOString().split('T')[0])
+const fecha  = ref(fechaLocal())
 const lista  = ref<Merma[]>([])
 const cargandoLista = ref(false)
 

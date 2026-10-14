@@ -9,15 +9,13 @@ import FabMerma        from './components/FabMerma.vue'
 import Login          from './components/Login.vue'
 import UserConfig     from './components/UserConfig.vue'
 import AdminUsuarios  from './components/AdminUsuarios.vue'
-import { fabApi, type Stats, type AuthUser, type Colaborador, type Area } from './composables/useFabApi'
+import { fabApi, fechaLocal, AUTH_KEY, type Stats, type AuthUser, type Colaborador, type Area } from './composables/useFabApi'
 
 // ── auth ───────────────────────────────────────────
-const AUTH_KEY  = 'fab_auth'
 const COLAB_KEY = 'fab_colab'
 
-const currentUser = ref<AuthUser | null>(
-  JSON.parse(localStorage.getItem(AUTH_KEY) || 'null')
-)
+const guardado: AuthUser | null = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null')
+const currentUser = ref<AuthUser | null>(guardado?.token ? guardado : null)
 
 function onLogin(user: AuthUser) {
   localStorage.setItem(AUTH_KEY, JSON.stringify(user))
@@ -83,7 +81,7 @@ onMounted(() => window.addEventListener('resize', onResize))
 onUnmounted(() => window.removeEventListener('resize', onResize))
 
 // ── fab data ────────────────────────────────────────
-const today      = new Date().toISOString().split('T')[0]
+const today      = fechaLocal()
 const fecha      = ref(today)
 const stats      = ref<Stats | null>(null)
 const refreshKey = ref(0)

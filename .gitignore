@@ -4,3 +4,4 @@ frontend/dist/
 .env
 *.js.map
 dist/
+.fab_secret
