@@ -5,7 +5,7 @@ import { fabApi, fechaLocal, type Fabricacion } from '../composables/useFabApi'
 const fecha      = ref(fechaLocal())
 const filas      = ref<Fabricacion[]>([])
 const cargando   = ref(false)
-const filtroEstado = ref<'todos' | 'pendiente' | 'aprobado' | 'cancelado'>('todos')
+const filtroEstado = ref<'todos' | Fabricacion['estado']>('todos')
 const actualizando = ref<Set<number>>(new Set())
 
 async function cargar() {
@@ -20,6 +20,9 @@ async function setEstado(f: Fabricacion, estado: 'aprobado' | 'cancelado' | 'pen
   try {
     await fabApi.setEstado(f.id, estado)
     f.estado = estado
+  } catch (e: any) {
+    alert(e.message)
+    await cargar()
   } finally {
     actualizando.value = new Set([...actualizando.value].filter(x => x !== f.id))
   }
@@ -35,6 +38,7 @@ const conteo = computed(() => ({
   pendiente: filas.value.filter(f => f.estado === 'pendiente').length,
   aprobado:  filas.value.filter(f => f.estado === 'aprobado').length,
   cancelado: filas.value.filter(f => f.estado === 'cancelado').length,
+  ICG:       filas.value.filter(f => f.estado === 'ICG').length,
 }))
 
 onMounted(cargar)
@@ -57,6 +61,9 @@ onMounted(cargar)
         </button>
         <button :class="['chip chip-canc', { active: filtroEstado === 'cancelado' }]" @click="filtroEstado = 'cancelado'">
           Cancelado <span class="badge">{{ conteo.cancelado }}</span>
+        </button>
+        <button :class="['chip chip-icg', { active: filtroEstado === 'ICG' }]" @click="filtroEstado = 'ICG'">
+          En ICG <span class="badge">{{ conteo.ICG }}</span>
         </button>
       </div>
 
@@ -86,7 +93,7 @@ onMounted(cargar)
         </thead>
         <tbody>
           <tr v-for="f in visibles" :key="f.id" :class="['fab-row', `row-${f.estado}`]">
-            <td class="mono">{{ f.hora?.slice(0,5) }}</td>
+            <td class="mono">{{ f.hora }}</td>
             <td class="mono">{{ f.codarticulo }}</td>
             <td>{{ f.descripcion }}</td>
             <td class="mono center">{{ f.unidades }}</td>
@@ -99,7 +106,7 @@ onMounted(cargar)
             </td>
             <td class="acciones">
               <button
-                v-if="f.estado !== 'aprobado'"
+                v-if="f.estado !== 'aprobado' && f.estado !== 'ICG'"
                 class="btn-aprobar"
                 :disabled="actualizando.has(f.id)"
                 @click="setEstado(f, 'aprobado')"
@@ -111,7 +118,7 @@ onMounted(cargar)
                 @click="setEstado(f, 'cancelado')"
               >Cancelar</button>
               <button
-                v-if="f.estado !== 'pendiente'"
+                v-if="f.estado !== 'pendiente' && f.estado !== 'ICG'"
                 class="btn-pendiente"
                 :disabled="actualizando.has(f.id)"
                 @click="setEstado(f, 'pendiente')"
@@ -152,6 +159,7 @@ onMounted(cargar)
 .chip-pend.active { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
 .chip-apro.active { background: #dcfce7; border-color: #16a34a; color: #15803d; }
 .chip-canc.active { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
+.chip-icg.active  { background: #dbeafe; border-color: #2563eb; color: #1e40af; }
 
 .badge {
   background: var(--border); color: var(--text-muted);
@@ -198,6 +206,7 @@ onMounted(cargar)
 .chip-pendiente { background: #fef3c7; color: #92400e; }
 .chip-aprobado  { background: #dcfce7; color: #15803d; }
 .chip-cancelado { background: #fee2e2; color: #991b1b; }
+.chip-ICG       { background: #dbeafe; color: #1e40af; }
 
 .acciones { display: flex; gap: 5px; }
 

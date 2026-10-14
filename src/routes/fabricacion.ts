@@ -330,7 +330,7 @@ fabRouter.get('/fabricaciones', wrap(async (req, res) => {
     if (codvendedor !== null) rq.input('v', sql.Int, codvendedor);
 
     const r = await rq.query(`
-        SELECT f.id, f.hora, f.codarticulo, f.descripcion, f.unidades,
+        SELECT f.id, CONVERT(varchar(5), f.hora, 108) AS hora, f.codarticulo, f.descripcion, f.unidades,
                f.codvendedor, f.nombre_operario, f.codalmacen, f.observaciones,
                ISNULL(f.sin_stock, 0) AS sin_stock,
                ISNULL(f.estado, 'pendiente') AS estado
@@ -349,10 +349,13 @@ fabRouter.patch('/fabricaciones/:id/estado', soloAdmin, wrap(async (req, res) =>
     if (!['pendiente', 'aprobado', 'cancelado'].includes(estado))
         return void res.status(400).json({ error: 'Estado inválido' });
     const pool = await getPool(FAB);
-    await pool.request()
+    // ICG = ya bajado al ERP: solo se permite cancelar
+    const r = await pool.request()
         .input('id',     sql.Int,        id)
         .input('estado', sql.VarChar(10), estado)
-        .query(`UPDATE fabricaciones SET estado=@estado WHERE id=@id`);
+        .query(`UPDATE fabricaciones SET estado=@estado WHERE id=@id AND (estado<>'ICG' OR @estado='cancelado')`);
+    if (!r.rowsAffected[0])
+        return void res.status(409).json({ error: 'La fabricación ya está en ICG: solo se puede cancelar' });
     res.json({ ok: true });
 }));
 

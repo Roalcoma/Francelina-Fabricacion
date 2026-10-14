@@ -44,9 +44,6 @@ async function verModal(id: number, nombre: string, sinStock: number) {
   finally { modalLoading.value = false }
 }
 
-function fmtHora(dt: string) {
-  return new Date(dt).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })
-}
 function fmtNum(n: number) {
   const v = Number(n)
   return Number.isInteger(v) ? v.toLocaleString('es-PY') : v.toLocaleString('es-PY', { minimumFractionDigits: 1, maximumFractionDigits: 3 })
@@ -106,7 +103,7 @@ function formatFecha(iso: string) {
           </tr>
           <!-- datos -->
           <tr v-else v-for="r in rows" :key="r.id" class="tbl-row fade-in" @click="verModal(r.id, r.descripcion, r.sin_stock)">
-            <td class="mono" style="color:var(--text-muted);font-size:.7rem;white-space:nowrap;padding:12px 16px">{{ fmtHora(r.hora) }}</td>
+            <td class="mono" style="color:var(--text-muted);font-size:.7rem;white-space:nowrap;padding:12px 16px">{{ r.hora }}</td>
             <td style="padding:12px 16px;font-weight:500;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.descripcion }}</td>
             <td class="mono" style="padding:12px 16px;text-align:right;font-weight:600;color:var(--accent)">{{ fmtNum(r.unidades) }}</td>
             <td style="padding:12px 16px;color:var(--text-soft)">{{ r.nombre_operario || '—' }}</td>
