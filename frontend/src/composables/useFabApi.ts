@@ -21,7 +21,7 @@ async function apiFetch<T>(url: string, opts: RequestInit = {}): Promise<T> {
   return r.json()
 }
 
-export interface Receta   { CODARTICULO: number; DESCRIPCION: string; UNIDADMEDIDA: string; COMPONENTES: number; REFPROVEEDOR: string }
+export interface Receta   { CODARTICULO: number; DESCRIPCION: string; UNIDADMEDIDA: string; COMPONENTES: number; REFPROVEEDOR: string; CODBARRAS: string }
 export interface Componente { LINEAKIT: number; CODARTKIT: number; DESCRIPCION: string; UDS_KIT: number; UNIDADMEDIDA: string }
 export interface Operario  { CODVENDEDOR: number; NOMVENDEDOR: string }
 export interface Almacen   { CODALMACEN: string; NOMBREALMACEN: string }

@@ -21,7 +21,7 @@ const filteredRecetas = computed(() => {
   const q = recetaSearch.value.toUpperCase().trim()
   if (!q) return recetas.value
   return recetas.value.filter(r =>
-    r.REFPROVEEDOR.toUpperCase().includes(q) || r.DESCRIPCION.toUpperCase().includes(q)
+    r.REFPROVEEDOR.toUpperCase().includes(q) || r.CODBARRAS.includes(q) || r.DESCRIPCION.toUpperCase().includes(q)
   )
 })
 
@@ -35,11 +35,11 @@ function onComboBlur() {
   setTimeout(() => { comboOpen.value = false }, 150)
 }
 
-// auto-selección al escanear: si el texto coincide exactamente con un REFPROVEEDOR
+// auto-selección al escanear: coincide exacto con código de barras o referencia
 watch(recetaSearch, (val) => {
-  const q = val.trim()
+  const q = val.trim().toUpperCase()
   if (!q) return
-  const match = recetas.value.find(r => r.REFPROVEEDOR.toUpperCase() === q.toUpperCase())
+  const match = recetas.value.find(r => r.CODBARRAS === q || r.REFPROVEEDOR.toUpperCase() === q)
   if (match) selectReceta(match)
 })
 const receta        = ref<Receta | null>(null)

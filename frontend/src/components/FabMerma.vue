@@ -21,7 +21,7 @@ watch(buscar, val => {
   articulo.value = null
   const q = val.trim().toUpperCase()
   sugerencias.value = q
-    ? recetas.value.filter(r => r.DESCRIPCION.toUpperCase().includes(q) || r.REFPROVEEDOR.toUpperCase().includes(q))
+    ? recetas.value.filter(r => r.DESCRIPCION.toUpperCase().includes(q) || r.REFPROVEEDOR.toUpperCase().includes(q) || r.CODBARRAS.includes(q))
     : []
 })
 
