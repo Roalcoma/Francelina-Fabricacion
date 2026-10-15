@@ -5,3 +5,4 @@ frontend/dist/
 *.js.map
 dist/
 .fab_secret
+logs/

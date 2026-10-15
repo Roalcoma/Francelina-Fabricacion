@@ -51,6 +51,18 @@ export const getPool = async (dbName: string): Promise<sql.ConnectionPool> => {
     return connected;
 };
 
+// Crea la base de fabricación si no existe (instalación nueva)
+export async function asegurarBaseFab() {
+    if (!/^\w+$/.test(FAB_DB)) throw new Error(`FAB_DB inválido: "${FAB_DB}" (solo letras, números y _)`);
+    const master = await new sql.ConnectionPool({ ...fabConfig, database: 'master' }).connect();
+    try {
+        const r = await master.request().query(`IF DB_ID('${FAB_DB}') IS NULL BEGIN CREATE DATABASE [${FAB_DB}]; SELECT 1 AS creada END`);
+        if (r.recordset?.length) console.log(`Base de datos ${FAB_DB} creada en ${fabConfig.server}`);
+    } finally {
+        await master.close();
+    }
+}
+
 export const getErpPool = async (): Promise<sql.ConnectionPool> => {
     return getPool(process.env.ERP_DB || '');
 };

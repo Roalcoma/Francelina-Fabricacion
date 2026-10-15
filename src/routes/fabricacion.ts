@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import * as sql from 'mssql';
-import { getPool } from '../config/db';
+import { getPool, asegurarBaseFab } from '../config/db';
 import { encriptacion } from '../utils/encriptacion';
 import { execFile } from 'child_process';
 import * as path from 'path';
@@ -12,139 +12,163 @@ export const fabRouter = Router();
 const LOCO        = process.env.FAB_LOCO_DB     || 'LOCO';
 const FAB         = process.env.FAB_DB          || 'FABRICACION';
 const USUARIOS_DB = process.env.FAB_USUARIOS_DB || LOCO;
+// CODUSUARIO que siempre entran como admin (para la primera configuración en un cliente nuevo)
+const ADMINS = (process.env.FAB_ADMINS || '').split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+
+// ── Migraciones versionadas ───────────────────────────────
+// Cada paso se aplica una sola vez por base y queda registrado en _migraciones.
+// Para cambiar la estructura: AGREGAR un paso al final. Nunca editar ni reordenar uno publicado.
+// Los pasos son idempotentes para que bases creadas antes del versionado se registren sin romperse.
+const MIGRACIONES: string[] = [
+    // 1 · fabricaciones
+    `IF OBJECT_ID('fabricaciones') IS NULL
+     CREATE TABLE fabricaciones (
+         id                 INT IDENTITY PRIMARY KEY,
+         fecha              DATE          NOT NULL DEFAULT CONVERT(DATE, GETDATE()),
+         hora               DATETIME      NOT NULL DEFAULT GETDATE(),
+         codarticulo        INT           NOT NULL,
+         descripcion        NVARCHAR(40)  NOT NULL,
+         unidades           FLOAT         NOT NULL,
+         codvendedor        INT           NOT NULL,
+         nombre_operario    NVARCHAR(100) NULL,
+         codalmacen         NVARCHAR(10)  NULL,
+         observaciones      NVARCHAR(500) NULL
+     );`,
+
+    // 2 · componentes de cada fabricación
+    `IF OBJECT_ID('fabricaciones_componentes') IS NULL
+     CREATE TABLE fabricaciones_componentes (
+         id             INT IDENTITY PRIMARY KEY,
+         id_fabricacion INT          NOT NULL REFERENCES fabricaciones(id),
+         codarticulo    INT          NOT NULL,
+         descripcion    NVARCHAR(40) NULL,
+         unidades_kit   FLOAT        NOT NULL,
+         unidades_total FLOAT        NOT NULL
+     );`,
+
+    // 3 · columnas agregadas a fabricaciones con el tiempo
+    `IF COL_LENGTH('fabricaciones_componentes', 'stock_inicial') IS NULL ALTER TABLE fabricaciones_componentes ADD stock_inicial FLOAT NULL;
+     IF COL_LENGTH('fabricaciones_componentes', 'merma_pct')     IS NULL ALTER TABLE fabricaciones_componentes ADD merma_pct FLOAT NOT NULL DEFAULT 0;
+     IF COL_LENGTH('fabricaciones', 'sin_stock')          IS NULL ALTER TABLE fabricaciones ADD sin_stock BIT NOT NULL DEFAULT 0;
+     IF COL_LENGTH('fabricaciones', 'estado')             IS NULL ALTER TABLE fabricaciones ADD estado VARCHAR(10) NOT NULL DEFAULT 'pendiente';
+     IF COL_LENGTH('fabricaciones', 'codalmacen_destino') IS NULL ALTER TABLE fabricaciones ADD codalmacen_destino VARCHAR(10) NULL;
+     IF COL_LENGTH('fabricaciones', 'HASHID')             IS NULL ALTER TABLE fabricaciones ADD HASHID NVARCHAR(40) NOT NULL DEFAULT CONVERT(NVARCHAR(40), NEWID());
+     IF COL_LENGTH('fabricaciones', 'codalmacen') < 20 ALTER TABLE fabricaciones ALTER COLUMN codalmacen NVARCHAR(10) NULL;`,
+
+    // 4 · merma configurada por ingrediente de receta
+    `IF OBJECT_ID('merma_recetas') IS NULL
+     CREATE TABLE merma_recetas (
+         codarticulo INT   NOT NULL,
+         codartkit   INT   NOT NULL,
+         merma_pct   FLOAT NOT NULL DEFAULT 0,
+         PRIMARY KEY (codarticulo, codartkit)
+     );`,
+
+    // 5 · almacenes por defecto de cada usuario
+    `IF OBJECT_ID('configuracion_usuarios') IS NULL
+     CREATE TABLE configuracion_usuarios (
+         codvendedor     INT         PRIMARY KEY,
+         almacen_origen  VARCHAR(10) NULL,
+         almacen_destino VARCHAR(10) NULL
+     );`,
+
+    // 6 · áreas (rol y familia de cada usuario)
+    `IF OBJECT_ID('areas') IS NULL
+     CREATE TABLE areas (
+         id           INT IDENTITY PRIMARY KEY,
+         nombre       NVARCHAR(100) NOT NULL,
+         numseccion   INT           NOT NULL,
+         codvendedor  INT           NOT NULL,
+         activo       BIT           NOT NULL DEFAULT 1
+     );
+     IF COL_LENGTH('areas', 'numdpto') IS NOT NULL AND COL_LENGTH('areas', 'numseccion') IS NULL
+         EXEC sp_rename 'areas.numdpto', 'numseccion', 'COLUMN';
+     IF COL_LENGTH('areas', 'familia_desc') IS NULL ALTER TABLE areas ADD familia_desc NVARCHAR(100) NULL;
+     IF COL_LENGTH('areas', 'rol')          IS NULL ALTER TABLE areas ADD rol NVARCHAR(20) NOT NULL DEFAULT 'personal';`,
+
+    // 7 · una sola área activa por usuario (conserva la más reciente)
+    `UPDATE a SET activo=0 FROM areas a
+     WHERE a.activo=1 AND EXISTS (SELECT 1 FROM areas b WHERE b.codvendedor=a.codvendedor AND b.activo=1 AND b.id>a.id);
+     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_areas_codvendedor_activo')
+         CREATE UNIQUE INDEX UX_areas_codvendedor_activo ON areas(codvendedor) WHERE activo=1;`,
+
+    // 8 · colaboradores por usuario
+    `IF OBJECT_ID('colaboradores') IS NULL
+     CREATE TABLE colaboradores (
+         id          INT IDENTITY PRIMARY KEY,
+         codvendedor INT           NULL,
+         nombre      NVARCHAR(100) NOT NULL,
+         activo      BIT           NOT NULL DEFAULT 1
+     );
+     IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID('colaboradores') AND name='codvendedor' AND is_nullable=0)
+         ALTER TABLE colaboradores ALTER COLUMN codvendedor INT NULL;`,
+
+    // 9 · mermas
+    `IF OBJECT_ID('mermas') IS NULL
+     CREATE TABLE mermas (
+         id              INT IDENTITY PRIMARY KEY,
+         fecha           DATE          NOT NULL DEFAULT GETDATE(),
+         hora            TIME          NOT NULL DEFAULT GETDATE(),
+         codarticulo     INT           NOT NULL,
+         descripcion     NVARCHAR(200) NOT NULL,
+         cantidad        FLOAT         NOT NULL,
+         motivo          NVARCHAR(300) NOT NULL,
+         codvendedor     INT           NOT NULL,
+         nombre_operario NVARCHAR(100) NOT NULL
+     );`,
+
+    // 10 · mermas: almacenes e ingredientes de la receta
+    `IF COL_LENGTH('mermas', 'codalmacen') IS NULL
+         ALTER TABLE mermas ADD codalmacen VARCHAR(10) NULL, codalmacen_destino VARCHAR(10) NULL;
+     IF OBJECT_ID('mermas_componentes') IS NULL
+     CREATE TABLE mermas_componentes (
+         id             INT IDENTITY PRIMARY KEY,
+         id_merma       INT           NOT NULL,
+         codarticulo    INT           NOT NULL,
+         descripcion    NVARCHAR(200) NOT NULL,
+         unidades_kit   FLOAT         NOT NULL,
+         unidades_total FLOAT         NOT NULL
+     );`,
+];
 
 export async function migrateFab() {
+    await asegurarBaseFab();
     const pool = await getPool(FAB);
     await pool.request().query(`
-        IF NOT EXISTS (
-            SELECT 1 FROM sys.columns
-            WHERE object_id = OBJECT_ID('fabricaciones_componentes') AND name = 'stock_inicial'
-        )
-        ALTER TABLE fabricaciones_componentes ADD stock_inicial FLOAT NULL;
+        IF OBJECT_ID('_migraciones') IS NULL
+        CREATE TABLE _migraciones (version INT PRIMARY KEY, aplicada DATETIME NOT NULL DEFAULT GETDATE());`);
+    const hechas = new Set((await pool.request().query(`SELECT version FROM _migraciones`)).recordset.map((r: any) => r.version));
 
-        IF NOT EXISTS (
-            SELECT 1 FROM sys.columns
-            WHERE object_id = OBJECT_ID('fabricaciones') AND name = 'sin_stock'
-        )
-        ALTER TABLE fabricaciones ADD sin_stock BIT NOT NULL DEFAULT 0;
+    for (const [i, paso] of MIGRACIONES.entries()) {
+        const version = i + 1;
+        if (hechas.has(version)) continue;
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            await new sql.Request(tx).batch(paso);
+            await new sql.Request(tx).input('v', sql.Int, version).query(`INSERT INTO _migraciones (version) VALUES (@v)`);
+            await tx.commit();
+            console.log(`Migración ${version} aplicada`);
+        } catch (e: any) {
+            await tx.rollback();
+            throw new Error(`Migración ${version} falló: ${e.message}`);
+        }
+    }
+}
 
-        IF NOT EXISTS (
-            SELECT 1 FROM sys.columns
-            WHERE object_id = OBJECT_ID('fabricaciones') AND name = 'estado'
-        )
-        ALTER TABLE fabricaciones ADD estado VARCHAR(10) NOT NULL DEFAULT 'pendiente';
-
-        IF NOT EXISTS (
-            SELECT 1 FROM sys.columns
-            WHERE object_id = OBJECT_ID('fabricaciones') AND name = 'codalmacen_destino'
-        )
-        ALTER TABLE fabricaciones ADD codalmacen_destino VARCHAR(10) NULL;
-
-        IF NOT EXISTS (
-            SELECT 1 FROM sys.columns
-            WHERE object_id = OBJECT_ID('fabricaciones') AND name = 'HASHID'
-        )
-        ALTER TABLE fabricaciones ADD HASHID NVARCHAR(40) NOT NULL DEFAULT CONVERT(NVARCHAR(40), NEWID());
-
-        IF NOT EXISTS (
-            SELECT 1 FROM sys.columns
-            WHERE object_id = OBJECT_ID('fabricaciones_componentes') AND name = 'merma_pct'
-        )
-        ALTER TABLE fabricaciones_componentes ADD merma_pct FLOAT NOT NULL DEFAULT 0;
-
-        IF OBJECT_ID('merma_recetas') IS NULL
-        CREATE TABLE merma_recetas (
-            codarticulo INT NOT NULL,
-            codartkit   INT NOT NULL,
-            merma_pct   FLOAT NOT NULL DEFAULT 0,
-            PRIMARY KEY (codarticulo, codartkit)
-        );
-
-        IF OBJECT_ID('configuracion_usuarios') IS NULL
-        CREATE TABLE configuracion_usuarios (
-            codvendedor     INT          PRIMARY KEY,
-            almacen_origen  VARCHAR(10)  NULL,
-            almacen_destino VARCHAR(10)  NULL
-        );
-
-        IF OBJECT_ID('areas') IS NULL
-        CREATE TABLE areas (
-            id           INT IDENTITY PRIMARY KEY,
-            nombre       NVARCHAR(100) NOT NULL,
-            numseccion   INT           NOT NULL,
-            codvendedor  INT           NOT NULL,
-            activo       BIT           NOT NULL DEFAULT 1,
-            familia_desc NVARCHAR(100) NULL
-        );
-
-        IF NOT EXISTS (
-            SELECT 1 FROM sys.columns
-            WHERE object_id = OBJECT_ID('areas') AND name = 'familia_desc'
-        )
-        ALTER TABLE areas ADD familia_desc NVARCHAR(100) NULL;
-
-        IF NOT EXISTS (
-            SELECT 1 FROM sys.columns
-            WHERE object_id = OBJECT_ID('areas') AND name = 'rol'
-        )
-        ALTER TABLE areas ADD rol NVARCHAR(20) NOT NULL DEFAULT 'personal';
-
-        IF EXISTS (
-            SELECT 1 FROM sys.columns
-            WHERE object_id = OBJECT_ID('areas') AND name = 'numdpto'
-        ) AND NOT EXISTS (
-            SELECT 1 FROM sys.columns
-            WHERE object_id = OBJECT_ID('areas') AND name = 'numseccion'
-        )
-        EXEC sp_rename 'areas.numdpto', 'numseccion', 'COLUMN';
-
-        -- una sola área activa por usuario: conserva la más reciente
-        UPDATE a SET activo=0 FROM areas a
-        WHERE a.activo=1 AND EXISTS (SELECT 1 FROM areas b WHERE b.codvendedor=a.codvendedor AND b.activo=1 AND b.id>a.id);
-
-        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_areas_codvendedor_activo')
-        CREATE UNIQUE INDEX UX_areas_codvendedor_activo ON areas(codvendedor) WHERE activo=1;
-
-        IF OBJECT_ID('colaboradores') IS NULL
-        CREATE TABLE colaboradores (
-            id          INT IDENTITY PRIMARY KEY,
-            codvendedor INT           NOT NULL,
-            nombre      NVARCHAR(100) NOT NULL,
-            activo      BIT           NOT NULL DEFAULT 1
-        );
-
-        IF EXISTS (
-            SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_NAME='colaboradores' AND COLUMN_NAME='codvendedor' AND IS_NULLABLE='NO'
-        )
-            ALTER TABLE colaboradores ALTER COLUMN codvendedor INT NULL;
-
-        IF OBJECT_ID('mermas') IS NULL
-        CREATE TABLE mermas (
-            id              INT IDENTITY PRIMARY KEY,
-            fecha           DATE         NOT NULL DEFAULT GETDATE(),
-            hora            TIME         NOT NULL DEFAULT GETDATE(),
-            codarticulo     INT          NOT NULL,
-            descripcion     NVARCHAR(200) NOT NULL,
-            cantidad        FLOAT        NOT NULL,
-            motivo          NVARCHAR(300) NOT NULL,
-            codvendedor     INT          NOT NULL,
-            nombre_operario NVARCHAR(100) NOT NULL
-        );
-
-        IF COL_LENGTH('mermas', 'codalmacen') IS NULL
-        ALTER TABLE mermas ADD codalmacen VARCHAR(10) NULL, codalmacen_destino VARCHAR(10) NULL;
-
-        IF OBJECT_ID('mermas_componentes') IS NULL
-        CREATE TABLE mermas_componentes (
-            id             INT IDENTITY PRIMARY KEY,
-            id_merma       INT           NOT NULL,
-            codarticulo    INT           NOT NULL,
-            descripcion    NVARCHAR(200) NOT NULL,
-            unidades_kit   FLOAT         NOT NULL,
-            unidades_total FLOAT         NOT NULL
-        );
-    `);
+// Confirma que las bases del ERP tienen las tablas de ICG que usa la app
+export async function verificarErp() {
+    const faltantes = async (db: string, tablas: string[]) => {
+        const r = await (await getPool(db)).request().query(
+            `SELECT name FROM sys.tables WHERE name IN (${tablas.map(t => `'${t}'`).join(',')})`);
+        const hay = new Set(r.recordset.map((x: any) => x.name.toUpperCase()));
+        return tablas.filter(t => !hay.has(t)).map(t => `${db}.${t}`);
+    };
+    const falta = [
+        ...await faltantes(LOCO, ['ARTICULOS', 'ARTICULOSLIN', 'KITS', 'FAMILIAS', 'STOCKS', 'ALMACEN', 'VENDEDORES', 'SECCIONES']),
+        ...await faltantes(USUARIOS_DB, ['USUARIOS']),
+    ];
+    if (falta.length) throw new Error(`No se encontraron tablas de ICG: ${falta.join(', ')}. Revisa FAB_LOCO_DB y FAB_USUARIOS_DB en .env`);
 }
 
 // ── helpers ───────────────────────────────────────────────
@@ -222,7 +246,7 @@ fabRouter.post('/login', wrap(async (req, res) => {
     const rolR = await fabPool.request()
         .input('cv', sql.Int, user.CODVENDEDOR)
         .query(`SELECT TOP 1 ISNULL(rol,'personal') AS rol FROM areas WHERE codvendedor=@cv AND activo=1 ORDER BY id DESC`);
-    const rol = rolR.recordset[0]?.rol ?? 'personal';
+    const rol = ADMINS.includes(user.CODUSUARIO) ? 'admin' : (rolR.recordset[0]?.rol ?? 'personal');
     res.json({ ...user, rol, token: crearToken(user.CODUSUARIO, rol) });
 }));
 
