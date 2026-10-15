@@ -37,14 +37,19 @@ if (Test-Path "$root\.env") {
     Write-Host '[instalar] .env creado.'
 }
 
-# ── 2. Dependencias y compilación ───────────────────────────
-Write-Host "`n[instalar] Instalando dependencias y compilando (puede tardar unos minutos)"
-npm install --silent;               if ($LASTEXITCODE) { throw 'npm install (backend) falló' }
-npx tsc;                            if ($LASTEXITCODE) { throw 'Compilación del backend falló' }
-Set-Location "$root\frontend"
-npm install --silent;               if ($LASTEXITCODE) { throw 'npm install (frontend) falló' }
-npm run build;                      if ($LASTEXITCODE) { throw 'Compilación del frontend falló' }
-Set-Location $root
+# ── 2. Dependencias y compilación (se omite si el paquete ya viene compilado) ──
+$precompilado = (Test-Path "$root\dist\index.js") -and (Test-Path "$root\frontend\dist\index.html") -and (Test-Path "$root\node_modules\express")
+if ($precompilado) {
+    Write-Host "`n[instalar] Paquete precompilado: no hace falta instalar dependencias ni compilar."
+} else {
+    Write-Host "`n[instalar] Instalando dependencias y compilando (puede tardar unos minutos)"
+    npm install --silent;               if ($LASTEXITCODE) { throw 'npm install (backend) falló' }
+    npx tsc;                            if ($LASTEXITCODE) { throw 'Compilación del backend falló' }
+    Set-Location "$root\frontend"
+    npm install --silent;               if ($LASTEXITCODE) { throw 'npm install (frontend) falló' }
+    npm run build;                      if ($LASTEXITCODE) { throw 'Compilación del frontend falló' }
+    Set-Location $root
+}
 
 # ── 3. Primer arranque: crea la base, aplica migraciones y valida ICG ──
 $puerto = ((Get-Content "$root\.env" | Where-Object { $_ -match '^PORT=' }) -replace "^PORT=|'", '')
