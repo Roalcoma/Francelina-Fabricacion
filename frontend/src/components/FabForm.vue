@@ -26,7 +26,7 @@ const filteredRecetas = computed(() => {
 })
 
 function selectReceta(r: Receta) {
-  recetaSearch.value = r.REFPROVEEDOR || r.DESCRIPCION
+  recetaSearch.value = r.CODBARRAS || r.DESCRIPCION
   selectedId.value   = String(r.CODARTICULO)
   comboOpen.value    = false
 }
@@ -330,8 +330,9 @@ function nuevoRegistro() {
               class="combo-item"
               @mousedown.prevent="selectReceta(r)"
             >
-              <span v-if="r.REFPROVEEDOR" class="combo-ref">{{ r.REFPROVEEDOR }}</span>
-              {{ r.DESCRIPCION }}
+              <span v-if="r.CODBARRAS" class="combo-ref">{{ r.CODBARRAS }}</span>
+              <span class="combo-desc">{{ r.DESCRIPCION }}</span>
+              <span v-if="r.REFPROVEEDOR" class="combo-referencia" title="Referencia">{{ r.REFPROVEEDOR }}</span>
             </div>
           </div>
         </div>
@@ -526,7 +527,14 @@ function nuevoRegistro() {
   border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
   max-height: 200px; overflow-y: auto;
 }
+.combo-desc { flex: 1; min-width: 0; }
+.combo-referencia {
+  flex-shrink: 0; font-size: .65rem; font-weight: 600; color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+  font-family: 'Fira Code', monospace;
+}
 .combo-item {
+  display: flex; align-items: center; gap: 6px;
   padding: 8px 12px; font-size: .8rem; color: var(--text-soft);
   cursor: pointer; border-bottom: 1px solid var(--border);
 }
