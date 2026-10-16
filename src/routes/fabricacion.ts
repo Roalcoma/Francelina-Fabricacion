@@ -129,6 +129,15 @@ const MIGRACIONES: string[] = [
          unidades_kit   FLOAT         NOT NULL,
          unidades_total FLOAT         NOT NULL
      );`,
+
+    // 11 · el rol pasa a ser del usuario (antes estaba en su área y se perdía si no tenía área)
+    `IF COL_LENGTH('configuracion_usuarios', 'rol') IS NULL
+         ALTER TABLE configuracion_usuarios ADD rol NVARCHAR(20) NULL;
+     EXEC('MERGE configuracion_usuarios AS t
+           USING (SELECT DISTINCT codvendedor FROM areas WHERE activo=1 AND rol=''admin'') AS s
+           ON t.codvendedor=s.codvendedor
+           WHEN MATCHED     THEN UPDATE SET rol=''admin''
+           WHEN NOT MATCHED THEN INSERT (codvendedor, rol) VALUES (s.codvendedor, ''admin'');');`,
 ];
 
 export async function migrateFab() {
@@ -245,7 +254,7 @@ fabRouter.post('/login', wrap(async (req, res) => {
     const fabPool = await getPool(FAB);
     const rolR = await fabPool.request()
         .input('cv', sql.Int, user.CODVENDEDOR)
-        .query(`SELECT TOP 1 ISNULL(rol,'personal') AS rol FROM areas WHERE codvendedor=@cv AND activo=1 ORDER BY id DESC`);
+        .query(`SELECT ISNULL(rol,'personal') AS rol FROM configuracion_usuarios WHERE codvendedor=@cv`);
     const rol = ADMINS.includes(user.CODUSUARIO) ? 'admin' : (rolR.recordset[0]?.rol ?? 'personal');
     res.json({ ...user, rol, token: crearToken(user.CODUSUARIO, rol) });
 }));
@@ -819,8 +828,8 @@ fabRouter.get('/admin/usuarios', soloAdmin, wrap(async (req, res) => {
             WHERE ISNULL(BLOQUEADO,'F')!='T' AND ISNULL(DESCATALOGADO,'F')!='T'
             ORDER BY USUARIO
         `),
-        fabPool.request().query(`SELECT id, codvendedor, nombre, familia_desc, ISNULL(rol,'personal') AS rol FROM areas WHERE activo=1`),
-        fabPool.request().query(`SELECT codvendedor, almacen_origen, almacen_destino FROM configuracion_usuarios`),
+        fabPool.request().query(`SELECT id, codvendedor, nombre, familia_desc FROM areas WHERE activo=1`),
+        fabPool.request().query(`SELECT codvendedor, almacen_origen, almacen_destino, ISNULL(rol,'personal') AS rol FROM configuracion_usuarios`),
     ]);
     const areaMap: Record<number,any>   = {};
     const cfgMap:  Record<number,any>   = {};
@@ -829,7 +838,7 @@ fabRouter.get('/admin/usuarios', soloAdmin, wrap(async (req, res) => {
     res.json(usuariosR.recordset.map(u => ({
         codvendedor:     u.CODUSUARIO,
         usuario:         u.USUARIO,
-        rol:             areaMap[u.CODUSUARIO]?.rol             ?? 'personal',
+        rol:             ADMINS.includes(u.CODUSUARIO) ? 'admin' : (cfgMap[u.CODUSUARIO]?.rol ?? 'personal'),
         nombre_area:     areaMap[u.CODUSUARIO]?.nombre          ?? '',
         familia_desc:    areaMap[u.CODUSUARIO]?.familia_desc    ?? null,
         almacen_origen:  cfgMap[u.CODUSUARIO]?.almacen_origen   ?? '',
@@ -844,35 +853,31 @@ fabRouter.put('/admin/usuarios/:codvendedor', soloAdmin, wrap(async (req, res) =
         rol: string; nombre_area: string; familia_desc?: string | null;
         almacen_origen: string; almacen_destino: string;
     };
+    if (!['admin', 'personal'].includes(rol)) return void res.status(400).json({ error: 'Rol inválido' });
     const fabPool = await getPool(FAB);
     if (nombre_area?.trim()) {
         await fabPool.request()
             .input('nom', sql.NVarChar(100), nombre_area.trim())
             .input('cv',  sql.Int,           cv)
             .input('fam', sql.NVarChar(100), familia_desc?.trim() || null)
-            .input('rol', sql.NVarChar(20),  rol || 'personal')
             .query(`
                 MERGE areas AS t
                 USING (SELECT @cv AS codvendedor) AS s ON t.codvendedor=s.codvendedor AND t.activo=1
-                WHEN MATCHED     THEN UPDATE SET nombre=@nom, familia_desc=@fam, rol=@rol
-                WHEN NOT MATCHED THEN INSERT (nombre, numseccion, codvendedor, familia_desc, rol, activo)
-                                      VALUES (@nom, 0, @cv, @fam, @rol, 1);
+                WHEN MATCHED     THEN UPDATE SET nombre=@nom, familia_desc=@fam
+                WHEN NOT MATCHED THEN INSERT (nombre, numseccion, codvendedor, familia_desc, activo)
+                                      VALUES (@nom, 0, @cv, @fam, 1);
             `);
-    } else {
-        await fabPool.request()
-            .input('cv',  sql.Int,          cv)
-            .input('rol', sql.NVarChar(20), rol || 'personal')
-            .query(`UPDATE areas SET rol=@rol WHERE codvendedor=@cv AND activo=1`);
     }
     await fabPool.request()
-        .input('cv', sql.Int,        cv)
-        .input('ao', sql.VarChar(10), almacen_origen  || '')
-        .input('ad', sql.VarChar(10), almacen_destino || '')
+        .input('cv',  sql.Int,         cv)
+        .input('ao',  sql.VarChar(10), almacen_origen  || '')
+        .input('ad',  sql.VarChar(10), almacen_destino || '')
+        .input('rol', sql.NVarChar(20), rol)
         .query(`
             MERGE configuracion_usuarios AS t
             USING (SELECT @cv AS codvendedor) AS s ON t.codvendedor=s.codvendedor
-            WHEN MATCHED     THEN UPDATE SET almacen_origen=@ao, almacen_destino=@ad
-            WHEN NOT MATCHED THEN INSERT (codvendedor,almacen_origen,almacen_destino) VALUES (@cv,@ao,@ad);
+            WHEN MATCHED     THEN UPDATE SET almacen_origen=@ao, almacen_destino=@ad, rol=@rol
+            WHEN NOT MATCHED THEN INSERT (codvendedor, almacen_origen, almacen_destino, rol) VALUES (@cv, @ao, @ad, @rol);
         `);
     res.json({ ok: true });
 }));

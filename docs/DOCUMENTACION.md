@@ -29,7 +29,7 @@ fabricacion.ts
 
 - Token propio: `base64url(JSON{cv, rol, exp}) + "." + HMAC-SHA256`, válido 7 días, comparado con `timingSafeEqual`.
 - Clave de firma: `FAB_SECRET` o, si falta, archivo `.fab_secret` (se genera solo la primera vez). Si se borra `.fab_secret`, todas las sesiones se invalidan.
-- Rol `admin`: `CODUSUARIO` listado en `FAB_ADMINS` o `areas.rol = 'admin'`. El resto es `personal`.
+- Rol `admin`: `CODUSUARIO` listado en `FAB_ADMINS` o `configuracion_usuarios.rol = 'admin'`. El resto es `personal`. (`areas.rol` quedó sin uso desde la migración 11.)
 - `personal` ve solo las recetas de la familia de su área.
 
 ### 2.2 Estados de una fabricación
@@ -129,6 +129,7 @@ Se crea sola si no existe (requiere permiso `CREATE DATABASE`). Las tablas se cr
 | 8 | `colaboradores` |
 | 9 | `mermas` |
 | 10 | almacenes en `mermas` + `mermas_componentes` |
+| 11 | `configuracion_usuarios.rol` (el rol pasa del área al usuario; copia los admins existentes) |
 
 Regla: **solo se agregan pasos al final**; nunca se editan ni reordenan los publicados. Los pasos son idempotentes.
 
